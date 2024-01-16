@@ -92,6 +92,12 @@ class LLMEngine:
         self.log_stats = log_stats
         self._verify_args()
 
+        self.is_prefill_dist = parallel_config.is_prefill_dist
+        self.driver_dummy_worker: RayWorkerVllm = None  # init at _init_workers_ray() or _init_workers()
+        self.driver_worker: 'Worker' = None  # init at _init_workers_ray() or _init_workers()
+        self.workers = []  # init at _init_workers_ray() or _init_workers()
+        self.prefill_workers = []  # init at _init_workers_ray() or _init_workers()
+
         self.tokenizer = get_tokenizer(
             model_config.tokenizer,
             tokenizer_mode=model_config.tokenizer_mode,
@@ -106,7 +112,9 @@ class LLMEngine:
             ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
             if ray_usage != "1":
                 os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
-            self._init_workers_ray(placement_group)
+            # TODO: If prefill disaggregate,
+            #  initialize 2 pools of workers.
+            self._init_workers_ray(placement_group, self.parallel_config)
         else:
             self._init_workers()
 
@@ -146,6 +154,7 @@ class LLMEngine:
         self._run_workers("load_model")
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
+                          parallel_config: "ParallelConfig",
                           **ray_remote_kwargs):
         if self.parallel_config.tensor_parallel_size == 1:
             num_gpus = self.cache_config.gpu_memory_utilization
