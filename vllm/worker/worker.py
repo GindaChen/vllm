@@ -1,5 +1,6 @@
 """A GPU worker class."""
 import os
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -15,6 +16,21 @@ from vllm.model_executor.parallel_utils.parallel_state import (
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
+
+
+@dataclass
+class WorkerRankConfig:
+    """A dataclass that contains the rank information of the worker."""
+    global_gpu_rank: int  # Global rank of the GPU
+    local_gpu_rank: int  # GPU rank wrt the node (e.g. used in "cuda:0")
+    global_world_size: int
+    local_world_size: int
+    role_id: int = 0 # Prefill or Decode
+    role_pp_rank: int = 0
+    role_pp_size: int = 1
+    role_tp_rank: int = 0
+    role_tp_size: int = 1
+    pass
 
 
 class Worker:
@@ -34,12 +50,19 @@ class Worker:
         rank: int,
         distributed_init_method: str,
         is_driver_worker: bool = False,
+        role_config: WorkerRankConfig = None,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
+        self.role_config = role_config
         self.local_rank = local_rank
         self.rank = rank
+        if role_config is not None:
+            # Override the rank information using the role_config.
+            self.local_rank = role_config.local_gpu_rank
+            self.rank = role_config.global_gpu_rank
+            pass
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
@@ -71,8 +94,11 @@ class Worker:
         _check_if_gpu_supports_dtype(self.model_config.dtype)
 
         # Initialize the distributed environment.
-        _init_distributed_environment(self.parallel_config, self.rank,
-                                      self.distributed_init_method)
+        # _init_distributed_environment(self.parallel_config, self.rank,
+        #                               self.distributed_init_method)
+        _init_distributed_environment_2(
+            self.role_config, self.distributed_init_method
+        )
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
@@ -197,6 +223,44 @@ class Worker:
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
         return output
+
+
+def _init_distributed_environment_2(
+    role_parallel_config: WorkerRankConfig,
+    distributed_init_method: Optional[str] = None
+):
+    global_world_size = role_parallel_config.global_world_size
+    global_rank = role_parallel_config.global_gpu_rank
+    if torch.distributed.is_initialized():
+        torch_world_size = torch.distributed.get_world_size()
+        if torch_world_size != global_world_size:
+            raise RuntimeError(
+                "torch.distributed is already initialized but the torch world "
+                "size does not match parallel_config.world_size "
+                f"({torch_world_size} vs. {global_world_size}).")
+    elif not distributed_init_method:
+        raise ValueError(
+            "distributed_init_method must be set if torch.distributed "
+            "is not already initialized")
+    else:
+        torch.distributed.init_process_group(
+            backend="nccl",
+            world_size=global_world_size,
+            rank=global_rank,
+            init_method=distributed_init_method,
+        )
+        pass
+
+    # Warmup
+    torch.distributed.all_reduce(torch.zeros(1).cuda())
+
+    # Initialize the model parallel groups.
+    # TODO: Implement the communication group.
+    pass
+
+
+def initialize_model_parallel_2():
+    pass
 
 
 def _init_distributed_environment(
