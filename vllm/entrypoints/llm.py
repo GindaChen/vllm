@@ -83,6 +83,8 @@ class LLM:
         max_context_len_to_capture: int = 8192,
         **kwargs,
     ) -> None:
+        is_dummy_llm = kwargs.pop('dummy_llm')
+
         if "disable_log_stats" not in kwargs:
             kwargs["disable_log_stats"] = True
         engine_args = EngineArgs(
@@ -102,8 +104,12 @@ class LLM:
             max_context_len_to_capture=max_context_len_to_capture,
             **kwargs,
         )
-        self.llm_engine = LLMEngine.from_engine_args(engine_args)
+        self.engine_args = engine_args
         self.request_counter = Counter()
+
+        if is_dummy_llm:
+            return
+        self.llm_engine = LLMEngine.from_engine_args(engine_args)
 
     def get_tokenizer(
             self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
