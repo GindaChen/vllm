@@ -110,6 +110,17 @@ class LLMEngine:
         else:
             self._init_workers()
 
+        if self.parallel_config.is_disaggregate:
+            # FIXME: Such a hacky process assignment, especially the driver process...
+            N = self.parallel_config.tensor_parallel_size
+            # Excluding the driver worker, assuming driver worker works on prefill.
+            N = N - 1
+            prefill_workers, decode_workers = self.workers[:N], self.workers[
+                N:]
+            prefill_workers = [self.driver_worker] + prefill_workers
+            self.prefill_workers, self.decode_workers = prefill_workers, decode_workers
+            pass
+
         # Profile the memory usage and initialize the cache.
         self._init_cache()
 
