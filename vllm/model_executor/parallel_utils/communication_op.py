@@ -6,10 +6,9 @@ from torch.distributed import ProcessGroup
 import torch
 
 from vllm.model_executor.parallel_utils.parallel_state import (
-    get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
     get_tensor_model_parallel_group,
-    get_tensor_model_parallel_src_rank,
+    get_tensor_model_parallel_rank,
 )
 
 
@@ -55,17 +54,22 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
     return output_tensor
 
 
-def tensor_model_parallel_gather(
-        input_: torch.Tensor,
-        dst: int = None,  # FIXME: Gather should specify the target!
-        dim: int = -1) -> torch.Tensor:
+def tensor_model_parallel_gather(input_: torch.Tensor,
+                                 dst: int = 0,
+                                 dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
+
+    Args:
+        input_: Input tensor to gather.
+        dst: Tensor parallel rank to gather the input tensor to.
+        dim: Dimension to gather.
+
+    Returns:
+        The gathered tensor.
 
     NOTE: We assume that the input tensor is on the same device across
     all the ranks.
     """
-    if dst is None:
-        dst = get_tensor_model_parallel_src_rank()
     world_size = get_tensor_model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
@@ -75,22 +79,23 @@ def tensor_model_parallel_gather(
     if dim < 0:
         # Convert negative dim to positive.
         dim += input_.dim()
-    # Allocate output tensor.
-    rank = torch.distributed.get_rank()
 
+    # Get global rank using group-local information.
+    group = get_tensor_model_parallel_group()
+    ranks = torch.distributed.get_process_group_ranks(group)
+    group_rank = get_tensor_model_parallel_rank()
+    rank = ranks[group_rank]
+
+    # Allocate output tensor.
     if rank == dst:
         gather_list = [torch.empty_like(input_) for _ in range(world_size)]
     else:
         gather_list = None
     # Gather.
-    torch.distributed.gather(input_,
-                             gather_list,
-                             dst=dst,
-                             group=get_tensor_model_parallel_group())
+    torch.distributed.gather(input_, gather_list, dst=dst, group=group)
+    output_tensor = None
     if rank == dst:
         output_tensor = torch.cat(gather_list, dim=dim)
-    else:
-        output_tensor = None
     return output_tensor
 
 
