@@ -64,7 +64,8 @@ def tensor_model_parallel_gather(
     NOTE: We assume that the input tensor is on the same device across
     all the ranks.
     """
-    dst = dst if dst is not None else get_tensor_model_parallel_src_rank()
+    if dst is None:
+        dst = get_tensor_model_parallel_src_rank()
     world_size = get_tensor_model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
