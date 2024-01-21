@@ -8,7 +8,8 @@ import torch
 from vllm.model_executor.parallel_utils.parallel_state import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
-    get_tensor_model_parallel_group, get_tensor_model_parallel_src_rank,
+    get_tensor_model_parallel_group,
+    get_tensor_model_parallel_src_rank,
 )
 
 
@@ -54,9 +55,10 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
     return output_tensor
 
 
-def tensor_model_parallel_gather(input_: torch.Tensor,
-                                 dst: int = None, # FIXME: Gather should specify the target!
-                                 dim: int = -1) -> torch.Tensor:
+def tensor_model_parallel_gather(
+        input_: torch.Tensor,
+        dst: int = None,  # FIXME: Gather should specify the target!
+        dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
 
     NOTE: We assume that the input tensor is on the same device across

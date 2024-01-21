@@ -894,6 +894,81 @@ class LLMEngine:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
+    def _run_workers_2(
+        self,
+        worker_group,
+        method: str,
+        *args,
+        driver_args: Optional[List[Any]] = None,
+        driver_kwargs: Optional[Dict[str, Any]] = None,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ):
+        """Similar to _run_workers(), except if all workers are remote worker,
+        then the first worker will be selected as if it is the driver worker.
+        No locality assumption is made.
+        """
+
+        def _is_local(worker) -> bool:
+            """Returns true if the worker is a local worker (wrt the driver)."""
+            return getattr(worker, 'is_driver_worker', False)
+
+        def _execute(worker, method, *args, **kwargs):
+            """Executes the given method on the worker. Returns a handler if
+            the worker is remote, otherwise returns the output directly.
+            """
+            if _is_local(worker):
+                return getattr(worker, method)(*args, **kwargs)
+            return worker.execute_method.remote(method, *args, **kwargs)
+
+        def _get_return_value(worker, output):
+            """Auxiliary function to get the return value of the worker."""
+            if _is_local(worker):
+                return output
+            return ray.get(output)
+
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
+
+        lead_worker, rest_workers = worker_group[0], worker_group[1:]
+
+        # Start the rest of the workers first.
+        rest_worker_outputs = [
+            _execute(worker, method, *args, **kwargs)
+            for worker in rest_workers
+        ]
+        driver_args = driver_args if driver_args is None else args
+        driver_kwargs = driver_kwargs if driver_kwargs is None else kwargs
+
+        # Start the driver worker after all the ray workers.
+        driver_worker_output = _execute(lead_worker, method, *driver_args,
+                                        **driver_kwargs)
+
+        # Return the results.
+        outputs = [driver_worker_output] + rest_worker_outputs
+        # result = [_get_return_value(worker, output) for worker, output in zip(worker_group, outputs)]
+        # return result
+
+        result = []
+        # FIXME: (HACK) Print detailed exception if happens (for debugging)
+        has_error = False
+        for worker_id, (worker,
+                        output) in enumerate(zip(worker_group, outputs)):
+            try:
+                r = _get_return_value(worker, output)
+                result.append(r)
+            except Exception as e:
+                logger.error(f"Ray worker {worker_id} failed with error: {e}")
+                traceback.print_exc()
+                has_error = True
+                pass
+            pass
+        if has_error:
+            raise Exception(
+                f"At execution of {method}, at least one worker failed.")
+        return outputs
+
     def _run_workers(
         self,
         method: str,
@@ -940,6 +1015,5 @@ class LLMEngine:
                     pass
                 pass
             raise e
-
 
         return [driver_worker_output] + ray_worker_outputs

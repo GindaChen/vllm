@@ -9,7 +9,6 @@ logger = init_logger(__name__)
 try:
     import ray
 
-
     class RayWorkerVllm:
         """Ray wrapper for vllm.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
