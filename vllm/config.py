@@ -351,8 +351,8 @@ class ParallelConfig:
 
     def _verify_args(self) -> None:
         if self.is_disaggregate:
-            # FIXME: Prefill disagg only support prefill / decode phase,
-            #  and TP among phases are the same.
+            # FIXME(GindaChen): (hack) Prefill disagg only support
+            #  prefill / decode phase, and TP among phases are the same.
             if self.pipeline_parallel_size != 2:
                 raise NotImplementedError(
                     "Prefill disaggregation is only supported when setting "
