@@ -894,7 +894,7 @@ class LLMEngine:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
-    def _run_workers_2(
+    def _run_worker_group(
         self,
         worker_group,
         method: str,
