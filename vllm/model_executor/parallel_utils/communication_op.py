@@ -60,6 +60,12 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
                                  dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
 
+    Args:
+        input_: Input tensor to gather.
+        dst: Destination rank in the tensor parallel group.
+            Defaults to 0 (the group-rank of the leader proc).
+        dim: Dimension to gather. Defaults to -1.
+
     NOTE: We assume that the input tensor is on the same device across
     all the ranks.
     """
@@ -94,7 +100,14 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
 def broadcast(input_: torch.Tensor,
               src: int = 0,
               group: Optional[ProcessGroup] = None):
-    """Broadcast the input tensor."""
+    """Broadcast the input tensor.
+
+    Args:
+        input_: Input tensor to broadcast.
+        src: Source rank with respect to `group`. Defaults to 0.
+        group: Process group. Defaults to the world group.
+
+    """
     group = group or torch.distributed.group.WORLD
     ranks = torch.distributed.get_process_group_ranks(group)
     assert src in ranks, f"Invalid src rank ({src})"
@@ -111,7 +124,13 @@ def broadcast(input_: torch.Tensor,
 def broadcast_object_list(obj_list: List[Any],
                           src: int = 0,
                           group: Optional[ProcessGroup] = None):
-    """Broadcast the input object list."""
+    """Broadcast the input object list.
+
+    Args:
+        obj_list: Input object list to broadcast.
+        src: Source rank with respect to `group`. Defaults to 0.
+        group: Process group. Defaults to the world group.
+    """
     group = group or torch.distributed.group.WORLD
     ranks = torch.distributed.get_process_group_ranks(group)
     assert src in ranks, f"Invalid src rank ({src})"
@@ -133,7 +152,14 @@ def broadcast_tensor_dict(
     src: int = 0,
     group: Optional[ProcessGroup] = None,
 ) -> Dict[Any, Union[torch.Tensor, Any]]:
-    """Broadcast the input tensor dictionary."""
+    """Broadcast the input tensor dictionary.
+
+    Args:
+        tensor_dict: Input tensor dictionary to broadcast.
+        src: Source rank with respect to `group`. Defaults to 0.
+        group: Process group. Defaults to the world group.
+
+    """
     group = group or torch.distributed.group.WORLD
     ranks = torch.distributed.get_process_group_ranks(group)
     assert src in ranks, f"Invalid src rank ({src})"
