@@ -54,6 +54,10 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
+    # FIXME: (hack) SHOULD NOT BE IN MASTER!
+    def execute_lambda(self, lambda_fn, *args, **kwargs):
+        return lambda_fn(self, *args, **kwargs)
+
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
         # the synchronization point. This causes the memory usage to grow
@@ -181,6 +185,7 @@ class Worker:
                 "blocks_to_swap_out": blocks_to_swap_out,
                 "blocks_to_copy": blocks_to_copy,
             }
+            # FIXME: rank of the driver worker. This function really should be called with the driver worker rank...
             broadcast_tensor_dict(data, src=0)
         else:
             data = broadcast_tensor_dict(src=0)
