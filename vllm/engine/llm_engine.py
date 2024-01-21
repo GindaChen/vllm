@@ -159,10 +159,12 @@ class LLMEngine:
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
-        if self.parallel_config.tensor_parallel_size == 1:
-            num_gpus = self.cache_config.gpu_memory_utilization
-        else:
-            num_gpus = 1
+        # FIXME: (Hack) reduce dev GPU util cost
+        num_gpus = self.cache_config.gpu_memory_utilization
+        # if self.parallel_config.tensor_parallel_size == 1:
+        #     num_gpus = self.cache_config.gpu_memory_utilization
+        # else:
+        #     num_gpus = 1
 
         self.driver_dummy_worker: RayWorkerVllm = None
         self.workers: List[RayWorkerVllm] = []
