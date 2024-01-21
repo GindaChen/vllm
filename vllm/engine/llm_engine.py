@@ -923,8 +923,22 @@ class LLMEngine:
         driver_worker_output = getattr(self.driver_worker,
                                        method)(*driver_args, **driver_kwargs)
 
+        # FIXME: (HACK) Print detailed exception if happens (for debugging)
         # Get the results of the ray workers.
-        if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
+        try:
+            if self.workers:
+                ray_worker_outputs = ray.get(ray_worker_outputs)
+        except Exception as e:
+            # Log every single worker's error, then throw exception
+            for index, output in enumerate(ray_worker_outputs):
+                try:
+                    ray.get(output)
+                except Exception as e:
+                    logger.error(f"Ray worker {index} failed with error: {e}")
+                    traceback.print_exc()
+                    pass
+                pass
+            raise e
+
 
         return [driver_worker_output] + ray_worker_outputs
