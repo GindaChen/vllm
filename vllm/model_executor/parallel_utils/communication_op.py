@@ -16,7 +16,9 @@ from vllm.model_executor.parallel_utils.parallel_state import (
 @contextlib.contextmanager
 def log_calling_method(method_name):
     """Log the calling method."""
+    yield
     return
+    
     print(f"Calling {method_name} ...")
     yield
     print(f"Finished {method_name} ...")
