@@ -766,8 +766,13 @@ class LLMEngine:
 
     def transfer_kv_cache(self, blocks_to_transfer: List[int]):
         # Invoke the transfer for each pipeline parallelism group.
+        # FIXME: The send_blocks and recv_blocks should be different,
+        #  and to-be allocated by the scheduler's block manager.
+        #  For simplicity, we ignore this part so far.
         self._run_workers("transfer_kv_cache",
-                          blocks_to_transfer=blocks_to_transfer)
+                          send_blocks=blocks_to_transfer,
+                          recv_blocks=blocks_to_transfer,
+                          )
         return
 
     def step(self) -> List[RequestOutput]:

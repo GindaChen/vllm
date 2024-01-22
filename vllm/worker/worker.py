@@ -169,7 +169,7 @@ class Worker:
                 event.wait()
 
     # FIXME: (hack) Hack the way out to identify prefill/decode role of the worker.
-    def transfer_kv_cache(self, blocks_to_transfer: List[int] = None):
+    def transfer_kv_cache(self, send_blocks: List[int] = None, recv_blocks: List[int] = None):
         """Migrate KV cache from prefill to decode. If the worker is
         responsible for prefill, then send; otherwise, receive.
         """
@@ -180,9 +180,9 @@ class Worker:
             return leader_rank == rank
 
         if is_prefill_worker():
-            self.cache_engine.send_blocks(blocks_to_transfer)
+            self.cache_engine.send_blocks(send_blocks)
         else:
-            self.cache_engine.recv_blocks(blocks_to_transfer)
+            self.cache_engine.recv_blocks(recv_blocks)
 
         torch.cuda.synchronize()
         return
