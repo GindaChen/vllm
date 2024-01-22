@@ -35,6 +35,8 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
 def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
+    print(
+        f"{__file__} - model_config.quantization: {model_config.quantization}")
     # Get the (maybe quantized) linear method.
     linear_method = None
     if model_config.quantization is not None:
@@ -58,11 +60,15 @@ def get_model(model_config: ModelConfig) -> nn.Module:
                 f"{supported_dtypes}")
         linear_method = quant_config.get_linear_method()
 
+    print(f"{__file__} - model_config.dtype: {model_config.dtype}")
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
         with torch.device("cuda"):
+            print(f"{__file__} - Ready to load model class.")
             model = model_class(model_config.hf_config, linear_method)
+
+        print(f"{__file__} - Ready to load weights.")
         if model_config.load_format == "dummy":
             # NOTE(woosuk): For accurate performance evaluation, we assign
             # random values to the weights.

@@ -1,3 +1,4 @@
+import contextlib
 from collections import namedtuple
 from typing import Any, Dict, List, Optional, Union
 
@@ -12,6 +13,15 @@ from vllm.model_executor.parallel_utils.parallel_state import (
 )
 
 
+@contextlib.contextmanager
+def log_calling_method(method_name):
+    """Log the calling method."""
+    print(f"Calling {method_name} ...")
+    yield
+    print(f"Finished {method_name} ...")
+
+
+@log_calling_method("tensor_model_parallel_all_reduce")
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group.
 
@@ -26,6 +36,7 @@ def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     return input_
 
 
+@log_calling_method("tensor_model_parallel_all_gather")
 def tensor_model_parallel_all_gather(input_: torch.Tensor,
                                      dim: int = -1) -> torch.Tensor:
     """All-gather the input tensor across model parallel group."""
@@ -54,6 +65,7 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
     return output_tensor
 
 
+@log_calling_method("tensor_model_parallel_gather")
 def tensor_model_parallel_gather(
         input_: torch.Tensor,
         dst: int = 0,  # local rank
@@ -94,6 +106,7 @@ def tensor_model_parallel_gather(
     return output_tensor
 
 
+@log_calling_method("tensor_model_parallel_scatter")
 def broadcast(input_: torch.Tensor,
               src: int = 0,
               group: Optional[ProcessGroup] = None):
@@ -111,6 +124,7 @@ def broadcast(input_: torch.Tensor,
     return input_
 
 
+@log_calling_method("tensor_model_parallel_broadcast")
 def broadcast_object_list(obj_list: List[Any],
                           src: int = 0,
                           group: Optional[ProcessGroup] = None):
@@ -131,6 +145,7 @@ def broadcast_object_list(obj_list: List[Any],
 TensorMetadata = namedtuple("TensorMetadata", ["dtype", "size"])
 
 
+@log_calling_method("broadcast_tensor_dict")
 def broadcast_tensor_dict(
     tensor_dict: Optional[Dict[Any, Union[torch.Tensor, Any]]] = None,
     src: int = 0,
