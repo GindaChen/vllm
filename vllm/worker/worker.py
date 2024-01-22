@@ -12,7 +12,7 @@ from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.parallel_state import (
     initialize_model_parallel, get_tensor_model_parallel_src_rank,
-    get_tensor_model_parallel_group)
+    get_tensor_model_parallel_group, get_tensor_model_parallel_rank)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
@@ -46,8 +46,12 @@ class Worker:
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
+        # FIXME: Assume the first worker in TP-group is the lead worker.
+        is_lead_worker = get_tensor_model_parallel_rank()
+        print(f"Worker {self.rank} has {is_lead_worker = }")
+        self.is_lead_worker = is_lead_worker
         self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config, is_driver_worker)
+                                        scheduler_config, is_lead_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
@@ -189,7 +193,6 @@ class Worker:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
         num_seq_groups = len(seq_group_metadata_list)
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
-
 
         # If there is no input, we don't need to execute the model.
         if num_seq_groups == 0:
