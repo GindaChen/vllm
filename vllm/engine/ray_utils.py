@@ -25,6 +25,10 @@ try:
         def __getattr__(self, name):
             return getattr(self.worker, name)
 
+        # FIXME: (hack) SHOULD NOT BE IN MASTER!
+        def execute_lambda(self, lambda_fn, *args, **kwargs):
+            return lambda_fn(self.worker, *args, **kwargs)
+
         def execute_method(self, method, *args, **kwargs):
             executor = getattr(self, method)
             return executor(*args, **kwargs)

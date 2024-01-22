@@ -128,6 +128,9 @@ class Worker:
         self.gpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
+    def execute_lambda(self, lambda_fn, *args, **kwargs):
+        return lambda_fn(self, *args, **kwargs)
+
     def warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
             self.model_runner.capture_model(self.gpu_cache)
