@@ -986,8 +986,8 @@ class LLMEngine:
             _execute(worker, method, *args, **kwargs)
             for worker in rest_workers
         ]
-        driver_args = driver_args if driver_args is None else args
-        driver_kwargs = driver_kwargs if driver_kwargs is None else kwargs
+        driver_args = driver_args if driver_args is not None else args
+        driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
 
         # Start the lead worker after all the ray workers.
         lead_worker_output = _execute(lead_worker, method, *driver_args,
