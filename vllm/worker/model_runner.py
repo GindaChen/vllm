@@ -449,13 +449,15 @@ class ModelRunner:
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        lead_worker_rank=0,
+        group=None,
     ) -> Optional[SamplerOutput]:
 
         input_tokens, input_positions, input_metadata, sampling_metadata = (
             self.prepare_input_tensors(
                 seq_group_metadata_list,
-                lead_worker_rank=get_tensor_model_parallel_src_rank(),
-                group=get_tensor_model_parallel_group(),
+                lead_worker_rank=lead_worker_rank,
+                group=group,
             ))
         # Execute the model.
         if input_metadata.use_cuda_graph:
