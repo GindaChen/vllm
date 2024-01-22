@@ -754,7 +754,7 @@ class LLMEngine:
         }
         worker_group = self.prefill_workers
         # worker_group = self.decode_workers
-        self.distribute_info(worker_group, data)
+        # self.distribute_info(worker_group, data)
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
@@ -763,6 +763,7 @@ class LLMEngine:
             all_outputs = self._run_worker_group(
                 worker_group,
                 "execute_model",
+                **data
             )
 
             # Only the driver worker returns the sampling results.
