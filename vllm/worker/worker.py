@@ -55,7 +55,15 @@ class Worker:
         self.gpu_cache = None
 
         # FIXME: (hack) SHOULD NOT BE IN MASTER!
-        self._pre_execute_model_data = None
+        self.pre_execute_model_data = None
+
+        # FIXME: (hack) SHOULD NOT BE IN MASTER!
+        def hack_store_data(self, data):
+            """Store data in the _pre_execute_model_data. Handler for passing data
+            from driver node to the other workers."""
+            self.pre_execute_model_data = data
+
+        self.hack_store_data = hack_store_data
 
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
@@ -168,10 +176,6 @@ class Worker:
                 event.wait()
 
     # FIXME: (hack) SHOULD NOT BE IN MASTER!
-    def _hack_store_data(self, data):
-        """Store data in the _pre_execute_model_data. Handler for passing data
-        from driver node to the other workers."""
-        self._pre_execute_model_data = data
 
     @torch.inference_mode()
     def execute_model(
@@ -182,7 +186,7 @@ class Worker:
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
     ) -> Optional[SamplerOutput]:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
-        data = self._pre_execute_model_data
+        data = self.pre_execute_model_data
         num_seq_groups = data["num_seq_groups"]
         blocks_to_swap_in = data["blocks_to_swap_in"]
         blocks_to_swap_out = data["blocks_to_swap_out"]
