@@ -49,24 +49,13 @@ class Worker:
 
         # FIXME: Assume the first worker in TP-group is the lead worker.
         self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config)
+                                        scheduler_config, self.is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
         self.cache_engine: 'CacheEngine' = None
         self.cache_events = None
         self.gpu_cache = None
-
-        # FIXME: (hack) SHOULD NOT BE IN MASTER!
-        self.pre_execute_model_data = None
-
-        # FIXME: (hack) SHOULD NOT BE IN MASTER!
-        def hack_store_data(data):
-            """Store data in the _pre_execute_model_data. Handler for passing data
-            from driver node to the other workers."""
-            self.pre_execute_model_data = data
-
-        self.hack_store_data = hack_store_data
 
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
