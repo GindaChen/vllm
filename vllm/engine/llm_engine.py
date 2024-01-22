@@ -737,7 +737,7 @@ class LLMEngine:
 
         # Make the leader worker the driver worker.
         def set_leader_worker(worker):
-            worker.is_driver_worker = True
+            # worker.is_driver_worker = True
             worker.model_runner.is_driver_worker = True
             return
 
