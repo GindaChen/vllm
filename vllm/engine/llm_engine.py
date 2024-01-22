@@ -760,11 +760,8 @@ class LLMEngine:
             # Execute the model.
             # TODO: (Question) why do we couple the data sending and model execution?
             #   For simplicity, can we just send the data to the workers then call "execute_model"?
-            all_outputs = self._run_worker_group(
-                worker_group,
-                "execute_model",
-                **data
-            )
+            all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                                 **data)
 
             # Only the driver worker returns the sampling results.
             output = all_outputs[0]

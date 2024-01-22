@@ -377,10 +377,10 @@ class ModelRunner:
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
+        lead_worker_rank=0,
+        group=None,
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata, SamplingMetadata]:
         # FIXME: (GindaChen) Does the function assume it calls on a TP-group?
-        lead_worker_rank = get_tensor_model_parallel_src_rank()
-        group = get_tensor_model_parallel_group()
         if self.is_driver_worker:
             # NOTE: We assume that all sequences in the group are all prompts or
             # all decodes.
@@ -414,9 +414,12 @@ class ModelRunner:
                 "selected_token_indices":
                 sampling_metadata.selected_token_indices,
             }
-            broadcast_tensor_dict(metadata_dict, src=lead_worker_rank, group=group)
+            broadcast_tensor_dict(metadata_dict,
+                                  src=lead_worker_rank,
+                                  group=group)
         else:
-            metadata_dict = broadcast_tensor_dict(src=lead_worker_rank, group=group)
+            metadata_dict = broadcast_tensor_dict(src=lead_worker_rank,
+                                                  group=group)
             input_tokens = metadata_dict["input_tokens"]
             input_positions = metadata_dict["input_positions"]
             input_metadata = InputMetadata(
@@ -447,8 +450,13 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
+
         input_tokens, input_positions, input_metadata, sampling_metadata = (
-            self.prepare_input_tensors(seq_group_metadata_list))
+            self.prepare_input_tensors(
+                seq_group_metadata_list,
+                lead_worker_rank=get_tensor_model_parallel_src_rank(),
+                group=get_tensor_model_parallel_group(),
+            ))
         # Execute the model.
         if input_metadata.use_cuda_graph:
             graph_batch_size = input_tokens.shape[0]
