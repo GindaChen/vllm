@@ -261,6 +261,9 @@ class ModelConfig:
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
+        # FIXME: (Hack) Support prefill disaggregation
+        if parallel_config.is_disaggregate:
+            return total_num_hidden_layers
         return total_num_hidden_layers // parallel_config.pipeline_parallel_size
 
 
