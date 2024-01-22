@@ -10,6 +10,8 @@ from vllm.logger import init_logger
 from vllm.model_executor import get_model, InputMetadata, SamplingMetadata
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
+from vllm.model_executor.parallel_utils.parallel_state import get_tensor_model_parallel_group, \
+    get_tensor_model_parallel_src_rank
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from vllm.utils import in_wsl
@@ -376,6 +378,9 @@ class ModelRunner:
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata, SamplingMetadata]:
+        # FIXME: (GindaChen) Does the function assume it calls on a TP-group?
+        lead_worker_rank = get_tensor_model_parallel_src_rank()
+        group = get_tensor_model_parallel_group()
         if self.is_driver_worker:
             # NOTE: We assume that all sequences in the group are all prompts or
             # all decodes.
@@ -409,9 +414,9 @@ class ModelRunner:
                 "selected_token_indices":
                 sampling_metadata.selected_token_indices,
             }
-            broadcast_tensor_dict(metadata_dict, src=0)
+            broadcast_tensor_dict(metadata_dict, src=lead_worker_rank, group=group)
         else:
-            metadata_dict = broadcast_tensor_dict(src=0)
+            metadata_dict = broadcast_tensor_dict(src=lead_worker_rank, group=group)
             input_tokens = metadata_dict["input_tokens"]
             input_positions = metadata_dict["input_positions"]
             input_metadata = InputMetadata(
