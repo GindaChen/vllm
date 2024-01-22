@@ -6,6 +6,8 @@ import torch
 from vllm._C import cache_ops
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
+from vllm.model_executor.parallel_utils.parallel_state import get_pipeline_model_parallel_next_rank, \
+    get_pipeline_model_parallel_prev_rank
 from vllm.utils import in_wsl
 
 logger = init_logger(__name__)
@@ -132,6 +134,34 @@ class CacheEngine:
 
     def swap_out(self, src_to_dst: Dict[int, int]) -> None:
         self._swap(self.gpu_cache, self.cpu_cache, src_to_dst)
+
+    def send_blocks(self, block_ids: List[int]) -> None:
+        tasks = []
+        rank = get_pipeline_model_parallel_next_rank()
+        for block_id in block_ids:
+            for i in range(self.num_layers):
+                for j in [0, 1]:
+                    a = self.gpu_cache[i][j][block_id]
+                    x = torch.distributed.isend(a, dst=rank)
+                    tasks.append(x)
+                pass
+        for task in tasks:
+            task.wait()
+        return
+
+    def recv_blocks(self, block_ids: List[int]) -> None:
+        tasks = []
+        rank = get_pipeline_model_parallel_prev_rank()
+        for block_id in block_ids:
+            for i in range(self.num_layers):
+                for j in [0, 1]:
+                    a = self.gpu_cache[i][j][block_id]
+                    x = torch.distributed.irecv(a, src=rank)
+                    tasks.append(x)
+                pass
+        for task in tasks:
+            task.wait()
+        return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
         key_caches = [key_cache for key_cache, _ in self.gpu_cache]

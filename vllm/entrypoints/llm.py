@@ -169,7 +169,10 @@ class LLM:
             token_ids = None if prompt_token_ids is None else prompt_token_ids[
                 i]
             self._add_request(prompt, sampling_params, token_ids, prefix_pos_i)
-        return self._run_engine(use_tqdm)
+        if self.llm_engine.parallel_config.is_disaggregate:
+            return self._run_engine_disaggregate(use_tqdm)
+        else:
+            return self._run_engine(use_tqdm)
 
     def _add_request(
         self,
@@ -206,3 +209,6 @@ class LLM:
         # its previous requests.
         outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
+
+    def _run_engine_disaggregate(self, use_tqdm: bool) -> List[RequestOutput]:
+        return self.llm_engine.run_engine_disaggregate()

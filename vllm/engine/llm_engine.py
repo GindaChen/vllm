@@ -694,6 +694,53 @@ class LLMEngine:
                                    scheduler_outputs.num_batched_tokens)
         return request_outputs
 
+    def run_engine_disaggregate(self):
+        results = []
+
+        # Run one prefill.
+        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        data = {
+            "seq_group_metadata_list": seq_group_metadata_list,
+            "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+            "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+            "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+        }
+        worker_group = self.prefill_workers
+        all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                             **data)
+        output = all_outputs[0]
+        results.append(output)
+        self._process_model_outputs(output, scheduler_outputs)
+
+        # Transfer KV Cache.
+        _blocks_to_transfer: 'List[Dict[int, List[int]]]' = [
+            i.block_tables for i in seq_group_metadata_list
+        ]
+        blocks_to_transfer = {
+            v
+            for table in _blocks_to_transfer for k, vs in table.items()
+            for v in vs
+        }
+        blocks_to_transfer = list(blocks_to_transfer)
+        self.transfer_kv_cache(blocks_to_transfer)
+
+        # Run one decode.
+        while self.scheduler.has_unfinished_seqs():
+            worker_group = self.decode_workers
+            all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                                 **data)
+            output = all_outputs[0]
+            self._process_model_outputs(output, scheduler_outputs)
+            results.append(output)
+
+        return results
+
+    def transfer_kv_cache(self, blocks_to_transfer: List[int]):
+        # Invoke the transfer for each pipeline parallelism group.
+        self._run_workers("transfer_kv_cache",
+                          blocks_to_transfer=blocks_to_transfer)
+        return
+
     def step(self) -> List[RequestOutput]:
         """Performs one decoding iteration and returns newly generated results.
 

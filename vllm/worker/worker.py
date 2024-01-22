@@ -12,7 +12,8 @@ from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.parallel_state import (
     initialize_model_parallel, get_tensor_model_parallel_src_rank,
-    get_tensor_model_parallel_group, get_tensor_model_parallel_rank)
+    get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
+    get_pipeline_model_parallel_first_rank)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
@@ -55,7 +56,7 @@ class Worker:
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
-        self.cache_engine = None
+        self.cache_engine: 'CacheEngine' = None
         self.cache_events = None
         self.gpu_cache = None
 
@@ -179,6 +180,25 @@ class Worker:
         if cache_events is not None:
             for event in cache_events:
                 event.wait()
+
+    # FIXME: (hack) Hack the way out to identify prefill/decode role of the worker.
+    def transfer_kv_cache(self, blocks_to_transfer: List[int] = None):
+        """Migrate KV cache from prefill to decode. If the worker is
+        responsible for prefill, then send; otherwise, receive.
+        """
+
+        def is_prefill_worker():
+            leader_rank = get_pipeline_model_parallel_first_rank()
+            rank = torch.distributed.get_rank()
+            return leader_rank == rank
+
+        if is_prefill_worker():
+            self.cache_engine.send_blocks(blocks_to_transfer)
+        else:
+            self.cache_engine.recv_blocks(blocks_to_transfer)
+
+        torch.cuda.synchronize()
+        return
 
     # FIXME: (hack) SHOULD NOT BE IN MASTER!
 
