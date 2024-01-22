@@ -709,8 +709,7 @@ class LLMEngine:
         all_outputs = self._run_worker_group(worker_group, "execute_model",
                                              **data)
         output = all_outputs[0]
-        results.append(output)
-        self._process_model_outputs(output, scheduler_outputs)
+        step_output = self._process_model_outputs(output, scheduler_outputs)
 
         # Transfer KV Cache.
         _blocks_to_transfer: 'List[Dict[int, List[int]]]' = [
@@ -726,13 +725,19 @@ class LLMEngine:
 
         # Run one decode.
         while self.scheduler.has_unfinished_seqs():
+            seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule(
+            )
             worker_group = self.decode_workers
             all_outputs = self._run_worker_group(worker_group, "execute_model",
                                                  **data)
             output = all_outputs[0]
-            self._process_model_outputs(output, scheduler_outputs)
-            results.append(output)
+            step_output = self._process_model_outputs(output,
+                                                      scheduler_outputs)
+            for _output in step_output:
+                if _output.finished:
+                    results.append(output)
 
+        results = sorted(results, key=lambda x: int(x.request_id))
         return results
 
     def transfer_kv_cache(self, blocks_to_transfer: List[int]):
