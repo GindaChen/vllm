@@ -770,13 +770,6 @@ class LLMEngine:
 
         return self._process_model_outputs(output, scheduler_outputs)
 
-    def distribute_info(self, worker_group, data):
-        """Distribute metadata info from driver process
-        to the designated workers.
-        """
-        self._run_worker_group(worker_group, "hack_store_data", data)
-        return
-
     def do_log_stats(self) -> None:
         self._log_system_stats(False, 0)
 
