@@ -81,6 +81,8 @@ class LLM:
         swap_space: int = 4,
         enforce_eager: bool = False,
         max_context_len_to_capture: int = 8192,
+        is_disaggregate: bool = False,
+        pipeline_parallel_size: int = 1,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -100,6 +102,8 @@ class LLM:
             swap_space=swap_space,
             enforce_eager=enforce_eager,
             max_context_len_to_capture=max_context_len_to_capture,
+            is_disaggregate=is_disaggregate,
+            pipeline_parallel_size=pipeline_parallel_size,
             **kwargs,
         )
         self.llm_engine = LLMEngine.from_engine_args(engine_args)
