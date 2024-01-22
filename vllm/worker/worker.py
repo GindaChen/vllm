@@ -58,7 +58,7 @@ class Worker:
         self.pre_execute_model_data = None
 
         # FIXME: (hack) SHOULD NOT BE IN MASTER!
-        def hack_store_data(self, data):
+        def hack_store_data(data):
             """Store data in the _pre_execute_model_data. Handler for passing data
             from driver node to the other workers."""
             self.pre_execute_model_data = data

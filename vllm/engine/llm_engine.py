@@ -776,7 +776,7 @@ class LLMEngine:
         """Distribute metadata info from driver process
         to the designated workers.
         """
-        self._run_worker_group(worker_group, "_hack_store_data", data)
+        self._run_worker_group(worker_group, "hack_store_data", data)
         return
 
     def do_log_stats(self) -> None:
