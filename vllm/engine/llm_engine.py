@@ -804,9 +804,10 @@ class LLMEngine:
             "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
             "blocks_to_copy": scheduler_outputs.blocks_to_copy,
         }
-        worker_group = self.prefill_workers
-        # worker_group = self.decode_workers
-        # self.distribute_info(worker_group, data)
+        if self.parallel_config.is_disaggregate:
+            worker_group = self.prefill_workers
+        else:
+            worker_group = [self.driver_worker] + self.workers
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
