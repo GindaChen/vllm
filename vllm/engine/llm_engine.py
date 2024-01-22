@@ -1081,4 +1081,4 @@ class LLMEngine:
         if has_error:
             raise Exception(
                 f"At execution of {method}, at least one worker failed.")
-        return outputs
+        return result
