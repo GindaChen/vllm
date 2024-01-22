@@ -18,7 +18,7 @@ def log_calling_method(method_name):
     """Log the calling method."""
     yield
     return
-    
+
     print(f"Calling {method_name} ...")
     yield
     print(f"Finished {method_name} ...")

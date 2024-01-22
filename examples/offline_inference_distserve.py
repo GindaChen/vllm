@@ -14,8 +14,10 @@ sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 llm = LLM(
     model="facebook/opt-125m",
     is_disaggregate=True,
-    tensor_parallel_size=2,
+    # tensor_parallel_size=2,
+    tensor_parallel_size=1,
     pipeline_parallel_size=2,
+    enforce_eager=False,  # disable model capture
 )
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
