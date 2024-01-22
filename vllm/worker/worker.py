@@ -186,11 +186,7 @@ class Worker:
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
     ) -> Optional[SamplerOutput]:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
-        data = self.pre_execute_model_data
-        num_seq_groups = data["num_seq_groups"]
-        blocks_to_swap_in = data["blocks_to_swap_in"]
-        blocks_to_swap_out = data["blocks_to_swap_out"]
-        blocks_to_copy = data["blocks_to_copy"]
+        num_seq_groups = len(seq_group_metadata_list)
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.
