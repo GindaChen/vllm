@@ -48,11 +48,8 @@ class Worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
         # FIXME: Assume the first worker in TP-group is the lead worker.
-        is_lead_worker = get_tensor_model_parallel_rank()
-        print(f"Worker {self.rank} has {is_lead_worker = }")
-        self.is_lead_worker = is_lead_worker
         self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config, is_lead_worker)
+                                        scheduler_config)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None

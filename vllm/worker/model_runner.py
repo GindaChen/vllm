@@ -11,7 +11,7 @@ from vllm.model_executor import get_model, InputMetadata, SamplingMetadata
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.parallel_state import get_tensor_model_parallel_group, \
-    get_tensor_model_parallel_src_rank
+    get_tensor_model_parallel_src_rank, get_tensor_model_parallel_rank
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from vllm.utils import in_wsl
@@ -37,7 +37,6 @@ class ModelRunner:
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
-        self.is_driver_worker = is_driver_worker
 
         # model_config can be None in tests/samplers/test_sampler.py.
         # FIXME(woosuk): This is a hack to make the tests work. Refactor this.
@@ -61,6 +60,13 @@ class ModelRunner:
         self.graph_block_tables = None  # Set after initial profiling.
         # cache in_wsl result
         self.in_wsl = in_wsl()
+
+    @property
+    def is_driver_worker(self):
+        # FIXME: (HACK) distinguish who is the driver worker.
+        rank = get_tensor_model_parallel_rank()
+        leader_rank = get_tensor_model_parallel_src_rank()
+        return rank == leader_rank
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
