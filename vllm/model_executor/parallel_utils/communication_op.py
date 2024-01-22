@@ -55,13 +55,16 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
 
 
 def tensor_model_parallel_gather(input_: torch.Tensor,
-                                 dst: int = 0,
+                                 dst: int = 0,  # local rank
                                  dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
 
     NOTE: We assume that the input tensor is on the same device across
     all the ranks.
     """
+    group = get_tensor_model_parallel_group()
+    ranks = torch.distributed.get_process_group_ranks(group)
+    dst_global_rank = ranks[dst]
     world_size = get_tensor_model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
@@ -72,16 +75,18 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
         # Convert negative dim to positive.
         dim += input_.dim()
     # Allocate output tensor.
-    if get_tensor_model_parallel_rank() == dst:
+    # rank = torch.distributed.get_rank()
+    rank = get_tensor_model_parallel_rank()
+    if rank == dst:
         gather_list = [torch.empty_like(input_) for _ in range(world_size)]
     else:
         gather_list = None
     # Gather.
     torch.distributed.gather(input_,
                              gather_list,
-                             dst=dst,
-                             group=get_tensor_model_parallel_group())
-    if get_tensor_model_parallel_rank() == dst:
+                             dst=dst_global_rank,
+                             group=group)
+    if rank == dst:
         output_tensor = torch.cat(gather_list, dim=dim)
     else:
         output_tensor = None
@@ -161,7 +166,7 @@ def broadcast_tensor_dict(
         for key, value in metadata_list:
             if isinstance(value, TensorMetadata):
                 tensor = tensor_dict[key]
-                torch.distributed.broadcast(tensor, src=src)
+                torch.distributed.broadcast(tensor, src=src, group=group)
     else:
         recv_metadata_list = [None]
         torch.distributed.broadcast_object_list(recv_metadata_list,
