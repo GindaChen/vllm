@@ -115,7 +115,7 @@ class LLMEngine:
             N = self.parallel_config.tensor_parallel_size
             N = N - 1  # Excluding the driver worker, assuming driver worker works on prefill.
             prefill_workers, decode_workers = self.workers[:N], self.workers[
-                N:]
+                                                                N:]
             prefill_workers = [self.driver_worker] + prefill_workers
             self.prefill_workers, self.decode_workers = prefill_workers, decode_workers
             pass
@@ -672,8 +672,8 @@ class LLMEngine:
                 self.scheduler.free_seq(seq)
 
     def _process_model_outputs(
-            self, output: SamplerOutput,
-            scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
+        self, output: SamplerOutput,
+        scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
         for seq_group, outputs in zip(scheduled_seq_groups, output):
@@ -694,7 +694,7 @@ class LLMEngine:
         # Update prefix state, now all the uncomputed prefixes are computed.
         for seq_group in scheduled_seq_groups:
             if (seq_group.prefix is not None and seq_group.prefix.allocated
-                    and not seq_group.prefix.computed):
+                and not seq_group.prefix.computed):
                 seq_group.prefix.computed = True
 
         if self.log_stats:
@@ -733,10 +733,23 @@ class LLMEngine:
         self.transfer_kv_cache(blocks_to_transfer)
 
         # Run one decode.
+        worker_group = self.decode_workers
+
+        # Make the leader worker the driver worker.
+        def set_leader_worker(worker):
+            worker.is_driver_worker = True
+            worker.model_runner.is_driver_worker = True
+            return
+
+        self._run_worker_group([worker_group[0]], "execute_lambda", set_leader_worker)
         while self.scheduler.has_unfinished_seqs():
-            seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule(
-            )
-            worker_group = self.decode_workers
+            seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+            data = {
+                "seq_group_metadata_list": seq_group_metadata_list,
+                "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+            }
             all_outputs = self._run_worker_group(worker_group, "execute_model",
                                                  **data)
             output = all_outputs[0]
@@ -912,14 +925,14 @@ class LLMEngine:
         """Decodes the new token for a sequence."""
         (new_tokens, new_output_text, prefix_offset,
          read_offset) = detokenize_incrementally(
-             self.tokenizer,
-             all_input_ids=seq.get_token_ids(),
-             prev_tokens=seq.tokens,
-             prefix_offset=seq.prefix_offset,
-             read_offset=seq.read_offset,
-             skip_special_tokens=prms.skip_special_tokens,
-             spaces_between_special_tokens=prms.spaces_between_special_tokens,
-         )
+            self.tokenizer,
+            all_input_ids=seq.get_token_ids(),
+            prev_tokens=seq.tokens,
+            prefix_offset=seq.prefix_offset,
+            read_offset=seq.read_offset,
+            skip_special_tokens=prms.skip_special_tokens,
+            spaces_between_special_tokens=prms.spaces_between_special_tokens,
+        )
         if seq.tokens is None:
             seq.tokens = new_tokens
         else:
@@ -955,7 +968,7 @@ class LLMEngine:
 
         # Check if the sequence has generated the EOS token.
         if ((not sampling_params.ignore_eos)
-                and seq.get_last_token_id() == self.tokenizer.eos_token_id):
+            and seq.get_last_token_id() == self.tokenizer.eos_token_id):
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
