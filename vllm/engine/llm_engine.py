@@ -228,6 +228,7 @@ class LLMEngine:
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)
 
+        logger.info(f"Initializing {len(self.workers)} workers in Ray.")
         for rank, (worker, (node_id,
                             _)) in enumerate(zip(self.workers,
                                                  worker_node_and_gpu_ids),
@@ -245,6 +246,8 @@ class LLMEngine:
 
         driver_rank = 0
         driver_local_rank = node_workers[driver_node_id].index(driver_rank)
+
+        logger.info(f"Initializing driver worker in Ray.")
         self.driver_worker = Worker(
             model_config,
             parallel_config,
@@ -255,12 +258,18 @@ class LLMEngine:
             is_driver_worker=True,
         )
 
+        logger.info(f"Running init_model.")
         self._run_workers("init_model")
+
+        logger.info(f"Running load_model.")
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
             max_parallel_loading_workers,
         )
+
+        logger.info(f"Finished Ray worker initialization.")
+        return
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
