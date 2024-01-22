@@ -54,6 +54,9 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
+        # FIXME: (hack) SHOULD NOT BE IN MASTER!
+        self._pre_execute_model_data = None
+
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
         # the synchronization point. This causes the memory usage to grow
@@ -164,6 +167,12 @@ class Worker:
             for event in cache_events:
                 event.wait()
 
+    # FIXME: (hack) SHOULD NOT BE IN MASTER!
+    def _hack_store_data(self, data):
+        """Store data in the _pre_execute_model_data. Handler for passing data
+        from driver node to the other workers."""
+        self._pre_execute_model_data = data
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -172,26 +181,12 @@ class Worker:
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
     ) -> Optional[SamplerOutput]:
-        if self.is_driver_worker:
-            assert seq_group_metadata_list is not None
-            num_seq_groups = len(seq_group_metadata_list)
-            assert blocks_to_swap_in is not None
-            assert blocks_to_swap_out is not None
-            assert blocks_to_copy is not None
-            data = {
-                "num_seq_groups": num_seq_groups,
-                "blocks_to_swap_in": blocks_to_swap_in,
-                "blocks_to_swap_out": blocks_to_swap_out,
-                "blocks_to_copy": blocks_to_copy,
-            }
-            broadcast_tensor_dict(data, src=0)
-        else:
-            data = broadcast_tensor_dict(src=0)
-            num_seq_groups = data["num_seq_groups"]
-            blocks_to_swap_in = data["blocks_to_swap_in"]
-            blocks_to_swap_out = data["blocks_to_swap_out"]
-            blocks_to_copy = data["blocks_to_copy"]
-
+        # FIXME: (hack) pre-execution metadata from driver node to this worker.
+        data = self._pre_execute_model_data
+        num_seq_groups = data["num_seq_groups"]
+        blocks_to_swap_in = data["blocks_to_swap_in"]
+        blocks_to_swap_out = data["blocks_to_swap_out"]
+        blocks_to_copy = data["blocks_to_copy"]
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.

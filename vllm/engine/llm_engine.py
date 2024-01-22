@@ -746,17 +746,24 @@ class LLMEngine:
             >>>         break
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        data = {
+            "seq_group_metadata_list": seq_group_metadata_list,
+            "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+            "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+            "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+        }
+        worker_group = self.prefill_workers
+        # worker_group = self.decode_workers
+        self.distribute_info(worker_group, data)
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
-            all_outputs = self._run_workers(
+            # TODO: (Question) why do we couple the data sending and model execution?
+            #   For simplicity, can we just send the data to the workers then call "execute_model"?
+            all_outputs = self._run_worker_group(
+                worker_group,
                 "execute_model",
-                driver_kwargs={
-                    "seq_group_metadata_list": seq_group_metadata_list,
-                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
-                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
-                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
-                })
+            )
 
             # Only the driver worker returns the sampling results.
             output = all_outputs[0]
@@ -764,6 +771,13 @@ class LLMEngine:
             output = []
 
         return self._process_model_outputs(output, scheduler_outputs)
+
+    def distribute_info(self, worker_group, data):
+        """Distribute metadata info from driver process
+        to the designated workers.
+        """
+        self._run_worker_group(worker_group, "_hack_store_data", data)
+        return
 
     def do_log_stats(self) -> None:
         self._log_system_stats(False, 0)
