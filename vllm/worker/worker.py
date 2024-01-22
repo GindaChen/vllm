@@ -49,7 +49,8 @@ class Worker:
 
         # FIXME: Assume the first worker in TP-group is the lead worker.
         self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config, self.is_driver_worker)
+                                        scheduler_config,
+                                        self.is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
