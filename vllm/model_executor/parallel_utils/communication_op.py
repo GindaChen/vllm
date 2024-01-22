@@ -54,9 +54,10 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
     return output_tensor
 
 
-def tensor_model_parallel_gather(input_: torch.Tensor,
-                                 dst: int = 0,  # local rank
-                                 dim: int = -1) -> torch.Tensor:
+def tensor_model_parallel_gather(
+        input_: torch.Tensor,
+        dst: int = 0,  # local rank
+        dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
 
     NOTE: We assume that the input tensor is on the same device across
