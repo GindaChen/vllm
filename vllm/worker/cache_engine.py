@@ -136,30 +136,36 @@ class CacheEngine:
         self._swap(self.gpu_cache, self.cpu_cache, src_to_dst)
 
     def send_blocks(self, block_ids: List[int]) -> None:
+        logger.debug(f"Sending blocks: {block_ids}")
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
         for block_id in block_ids:
             for i in range(self.num_layers):
+                logger.debug(f"Sending block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.isend(a, dst=rank)
                     tasks.append(x)
                 pass
         for task in tasks:
+            logger.debug(f"Waiting for task: {task}")
             task.wait()
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
+        logger.debug(f"Receiving blocks: {block_ids}")
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
         for block_id in block_ids:
             for i in range(self.num_layers):
+                logger.debug(f"Receiving block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.irecv(a, src=rank)
                     tasks.append(x)
                 pass
         for task in tasks:
+            logger.debug(f"Waiting for task: {task}")
             task.wait()
         return
 
