@@ -755,9 +755,9 @@ class LLMEngine:
             output = all_outputs[0]
             step_output = self._process_model_outputs(output,
                                                       scheduler_outputs)
-            for _output in step_output:
-                if _output.finished:
-                    results.append(output)
+            for item in step_output:
+                if item.finished:
+                    results.append(item)
 
         results = sorted(results, key=lambda x: int(x.request_id))
         return results
