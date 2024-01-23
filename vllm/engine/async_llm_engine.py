@@ -228,7 +228,8 @@ class _AsyncLLMEngine(LLMEngine):
                 "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
                 "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
                 "blocks_to_copy": scheduler_outputs.blocks_to_copy,
-                # FIXME: Add transfer block event.
+                "send_blocks": dist_output.send_blocks,
+                "recv_blocks": dist_output.recv_blocks,
             }
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,

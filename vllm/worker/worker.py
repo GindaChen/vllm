@@ -202,8 +202,8 @@ class Worker:
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
         # TODO: Decouple data transfer from the send/recv logic.
-        send_blocks=None,
-        recv_blocks=None,
+        send_blocks: List[int] = None,
+        recv_blocks: List[int] = None,
     ) -> Optional[SamplerOutput]:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
 
