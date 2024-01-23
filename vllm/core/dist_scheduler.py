@@ -18,6 +18,10 @@ class DistScheduleOutput:
     recv_blocks: List[int] = None
 
     @property
+    def is_transfer_schedule(self):
+        return self.send_blocks and self.recv_blocks
+
+    @property
     def prefill_metadata(self) -> List[SequenceGroupMetadata]:
         return self.prefill_schedule[0]
 
@@ -122,15 +126,14 @@ class DistScheduler:
         # 1. Transfer new blocks from prefill to decode.
         #       This should hijack the scheduling logic for decode.
         # 2. Decode without transferring new blocks.
-        _result = self.decode_scheduler.schedule(
-            only_transfer_new_blocks_in_decode=should_transfer_new_blocks, )
+        _result = self.decode_scheduler.schedule()
         metadata: List[SequenceGroupMetadata] = _result[0]
         output: SchedulerOutputs = _result[1]
         if metadata:
             self.is_decode_in_progress = True
+
         send_blocks = []
         recv_blocks = []
-
         if should_transfer_new_blocks:
             for item in metadata:
                 # FIXME: The SequenceGroupMetadata should have tracked what metadata the prefill engine is using.
@@ -141,10 +144,6 @@ class DistScheduler:
                     send_blocks.extend(blocks)
                     recv_blocks.extend(decode_blocks[seq_id])
                     pass
-
-            for item, seq_group in zip(metadata, output.scheduled_seq_groups):
-                is_seq_group_not_prefilled = item.is_prompt
-                self.decode_scheduler.add_seq_group(seq_group)
             pass
 
         return metadata, output, send_blocks, recv_blocks
@@ -188,7 +187,25 @@ class DistScheduler:
         return len(self.decode_scheduler.waiting) > 0
 
     def schedule(self) -> DistScheduleOutput:
-        # TODO: When to do the block migration?
+        # FIXME: Suboptimal scheduling algorithm if (actual) PP > 1.
+
+        # Case 0: Transfer should be scheduled.
+        if self.has_pending_transfer():
+            if self.is_prefill_in_progress or self.is_decode_in_progress:
+                return DistScheduleOutput()
+            # Perform pending transfer.
+            (decode_metadata, decode_output, send_blocks,
+             recv_blocks) = self._schedule_decode(
+                 should_transfer_new_blocks=False)
+            self.pending_migration_requests = [
+                g.request_id for g in decode_output.scheduled_seq_groups
+            ]
+            return DistScheduleOutput(
+                # decode_schedule=(decode_metadata, decode_output),
+                send_blocks=send_blocks,
+                recv_blocks=recv_blocks,
+            )
+
         # Case 1: Prefill and decode are both occupied. Do nothing.
         if self.is_prefill_in_progress and self.is_decode_in_progress:
             return DistScheduleOutput()
@@ -206,25 +223,17 @@ class DistScheduler:
 
         # Case 3: Decode is free, but prefill is in progress.
         if self.is_prefill_in_progress and not self.is_decode_in_progress:
-            _decode_schedule = self._schedule_decode(
-                should_transfer_new_blocks=False)
+            _decode_schedule = self._schedule_decode()
             (metadata, output, send_blocks, recv_blocks) = _decode_schedule
 
-            return DistScheduleOutput(
-                decode_schedule=(metadata, output),
-                send_blocks=send_blocks,
-                recv_blocks=recv_blocks,
-            )
+            return DistScheduleOutput(decode_schedule=(metadata, output), )
 
         # Case 4: Nothing is happening. Schedule both prefill and decode.
         prefill_metadata, prefill_output = self._schedule_prefill()
-        (decode_metadata, decode_output, send_blocks,
-         recv_blocks) = self._schedule_decode(should_transfer_new_blocks=False)
+        (decode_metadata, decode_output, _, _) = self._schedule_decode()
         return DistScheduleOutput(
             prefill_schedule=(prefill_metadata, prefill_output),
             decode_schedule=(decode_metadata, decode_output),
-            send_blocks=send_blocks,
-            recv_blocks=recv_blocks,
         )
 
     def fork_seq(self, parent_seq: Sequence, child_seq: Sequence) -> None:

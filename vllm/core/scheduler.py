@@ -299,25 +299,7 @@ class Scheduler:
         return scheduler_outputs
 
     def schedule(
-        self,
-        only_transfer_new_blocks_in_decode: bool = False,
-    ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
-
-        if only_transfer_new_blocks_in_decode:
-            # Get the requests in the waiting queue.
-            scheduled_seq_groups = list(self.waiting)
-            seq_group_metadata_list: List[SequenceGroupMetadata] = []
-            scheduler_outputs = SchedulerOutputs(
-                scheduled_seq_groups=scheduled_seq_groups,
-                prompt_run=False,
-                num_batched_tokens=0,
-                blocks_to_swap_in={},
-                blocks_to_swap_out={},
-                blocks_to_copy={},
-                ignored_seq_groups=[],
-            )
-            return seq_group_metadata_list, scheduler_outputs
-
+        self, ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.

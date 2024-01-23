@@ -222,7 +222,8 @@ class _AsyncLLMEngine(LLMEngine):
 
         # Invoke execute model
         output = []
-        if not scheduler_outputs.is_empty():
+        if not scheduler_outputs.is_empty(
+        ) or dist_output.is_transfer_schedule:
             data = {
                 "seq_group_metadata_list": seq_group_metadata_list,
                 "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,

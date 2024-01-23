@@ -176,7 +176,7 @@ class Worker:
         responsible for prefill, then send; otherwise, receive.
         """
 
-        if not send_blocks and not recv_blocks:
+        if not send_blocks or not recv_blocks:
             return
 
         def is_prefill_worker():
