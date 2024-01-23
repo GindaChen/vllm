@@ -205,7 +205,7 @@ class _AsyncLLMEngine(LLMEngine):
 
         return self._process_model_outputs(output, scheduler_outputs)
 
-    async def _schedule_dist_workers(
+    async def _invoke_dist_workers(
             self, dist_output: DistScheduleOutput,
             is_prefill: bool) -> Tuple[List[RequestOutput], bool]:
 
@@ -241,17 +241,17 @@ class _AsyncLLMEngine(LLMEngine):
         step_output = self._process_model_outputs(output, scheduler_outputs)
         return step_output, is_prefill
 
-    async def step_disagg_async(self) -> List[RequestOutput]:
+    async def step_dist_async(self) -> List[RequestOutput]:
         assert self.parallel_config.is_disaggregate
 
         scheduler: DistScheduler = self.scheduler
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        prefill_future = self._schedule_dist_workers(scheduler_outputs,
-                                                     is_prefill=True)
-        decode_future = self._schedule_dist_workers(scheduler_outputs,
-                                                    is_prefill=False)
+        prefill_future = self._invoke_dist_workers(scheduler_outputs,
+                                                   is_prefill=True)
+        decode_future = self._invoke_dist_workers(scheduler_outputs,
+                                                  is_prefill=False)
 
         if prefill_future:
             self.pending_futures.add(prefill_future)
@@ -473,7 +473,7 @@ class AsyncLLMEngine:
             request_outputs = await self.engine.step.remote()
         else:
             if self.engine.parallel_config.is_disaggregate:
-                request_outputs = await self.engine.step_disagg_async()
+                request_outputs = await self.engine.step_dist_async()
             else:
                 request_outputs = await self.engine.step_async()
 
