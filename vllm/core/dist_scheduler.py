@@ -16,7 +16,22 @@ class DistScheduleOutput:
     #  assume send / recv blocks are one-to-one mapping
     send_blocks: List[int] = None
     recv_blocks: List[int] = None
-    pass
+
+    @property
+    def prefill_metadata(self) -> List[SequenceGroupMetadata]:
+        return self.prefill_schedule[0]
+
+    @property
+    def prefill_output(self) -> SchedulerOutputs:
+        return self.prefill_schedule[1]
+
+    @property
+    def decode_metadata(self) -> List[SequenceGroupMetadata]:
+        return self.decode_schedule[0]
+
+    @property
+    def decode_output(self) -> SchedulerOutputs:
+        return self.decode_schedule[1]
 
 
 class DistScheduler:
