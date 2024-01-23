@@ -212,10 +212,10 @@ class Worker:
                                recv_blocks=recv_blocks)
 
         # Perform cache swapping
-        num_seq_groups = len(seq_group_metadata_list)
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.
+        num_seq_groups = len(seq_group_metadata_list)
         if num_seq_groups == 0:
             return {}
 
