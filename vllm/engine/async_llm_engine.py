@@ -240,16 +240,13 @@ class _AsyncLLMEngine(LLMEngine):
         step_output = self._process_model_outputs(output, scheduler_outputs)
         return step_output, is_prefill
 
-    async def _step_disagg_async(self) -> List[RequestOutput]:
+    async def step_disagg_async(self) -> List[RequestOutput]:
         assert self.parallel_config.is_disaggregate
 
         scheduler: DistScheduler = self.scheduler
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        # TODO: Schedule the prefill and decode workers to do stuff, if any.
-        # TODO: The future should return a tuple (output, is_prefill).
-        # FIXME: Don't execute if the output for prefill / decode is empty.
         prefill_future = self._schedule_dist_workers(scheduler_outputs,
                                                      is_prefill=True)
         decode_future = self._schedule_dist_workers(scheduler_outputs,
@@ -262,10 +259,6 @@ class _AsyncLLMEngine(LLMEngine):
 
         if not self.pending_futures:
             return []
-            # TODO: What to return to the caller? Nothing?
-            a = scheduler_outputs.prefill_output.ignored_seq_groups
-            b = scheduler_outputs.decode_output.ignored_seq_groups
-            return a + b
 
         finished, pending = await asyncio.wait(
             self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
@@ -478,7 +471,10 @@ class AsyncLLMEngine:
         if self.engine_use_ray:
             request_outputs = await self.engine.step.remote()
         else:
-            request_outputs = await self.engine.step_async()
+            if self.engine.parallel_config.is_disaggregate:
+                request_outputs = await self.engine.step_disagg_async()
+            else:
+                request_outputs = await self.engine.step_async()
 
         # Put the outputs into the corresponding streams.
         for request_output in request_outputs:
