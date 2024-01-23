@@ -46,8 +46,8 @@ class DistScheduler:
 
         # Set to True if prefill / decode is in progress
         # TODO: (Rename) prefilling / decoding to is_prefilling / is_decoding
-        self.prefilling = False
-        self.decoding = False
+        self.is_prefill_in_progress = False
+        self.is_decode_in_progress = False
 
         self.ongoing_prefill_requests: 'Iterable[SequenceGroup]' = []
         self.ongoing_prefill_requests_meta: 'List[SequenceGroupMetadata]' = []
@@ -99,21 +99,25 @@ class DistScheduler:
 
     def _schedule_prefill(
             self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
-        assert not self.prefilling, "Prefilling is already ongoing."
+        assert not self.is_prefill_in_progress, "Prefilling is already ongoing."
 
         _result = self.prefill_scheduler.schedule()
-        metadata: List[SequenceGroupMetadata] = _result[0]
+        metadatas: List[SequenceGroupMetadata] = _result[0]
         output: SchedulerOutputs = _result[1]
-        if metadata:
-            self.prefilling = True
+        if metadatas:
+            self.is_prefill_in_progress = True
         self.ongoing_prefill_requests = output.scheduled_seq_groups
-        self.ongoing_prefill_requests_meta = metadata
-        return metadata, output
+        self.ongoing_prefill_requests_meta = metadatas
+        return metadatas, output
 
     # TODO: The return type is super complex now...
-    def _schedule_decode(self, transfer_new_blocks: bool = False):
+    def _schedule_decode(
+        self,
+        transfer_new_blocks: bool = False
+    ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs, List[int],
+               List[int]]:
         # TODO: (Rename) transfer_new_blocks --> should_transfer_new_blocks
-        assert not self.decoding, "Decoding is already ongoing."
+        assert not self.is_decode_in_progress, "Decoding is already ongoing."
         _result = self.decode_scheduler.schedule(
             # TODO: In the Scheduler, implement this primitive.
             enable_prefill=transfer_new_blocks,
@@ -122,7 +126,7 @@ class DistScheduler:
         metadata: List[SequenceGroupMetadata] = _result[0]
         output: SchedulerOutputs = _result[1]
         if metadata:
-            self.decoding = True
+            self.is_decode_in_progress = True
         send_blocks = []
         recv_blocks = []
 
@@ -146,11 +150,11 @@ class DistScheduler:
 
     def on_prefill_finish(self):
         """Function passing into the prefill_scheduler."""
-        assert self.prefilling, "Prefilling is not ongoing."
-        self.prefilling = False
+        assert self.is_prefill_in_progress, "Prefilling is not ongoing."
+        self.is_prefill_in_progress = False
 
         # Forward the requests to the decode scheduler.
-        # TODO: May need to pool these requests in a queue.
+        # TODO: May need to pool these requests in a queue in the dest scheduler.
         for seq_group in self.ongoing_prefill_requests:
             self.decode_scheduler.add_seq_group(seq_group)
         # Update the blocks used in these prefill requests.
@@ -165,8 +169,8 @@ class DistScheduler:
 
     def on_decode_finish(self):
         """Function passing into the decode_scheduler."""
-        assert self.decoding, "Decoding is not ongoing."
-        self.decoding = False
+        assert self.is_decode_in_progress, "Decoding is not ongoing."
+        self.is_decode_in_progress = False
 
         # TODO: Simply assuming the decode always drains the migration.
         self.prefill_scheduler.abort_seq_group(self.pending_migration_requests)
@@ -179,22 +183,22 @@ class DistScheduler:
 
     def schedule(self) -> DistScheduleOutput:
         # Case 1: Prefill and decode are both occupied. Do nothing.
-        if self.prefilling and self.decoding:
+        if self.is_prefill_in_progress and self.is_decode_in_progress:
             return DistScheduleOutput()
 
-        # Case 2: Decode is occupied, but prefill is not.
-        if not self.prefilling and self.decoding:
+        # Case 2: Prefill is free, but decode is in progress.
+        if not self.is_prefill_in_progress and self.is_decode_in_progress:
             # Case 2.1: There are requests being transferred from prefill to decode.
             # Do nothing and wait for the transfer to finish.
             if self.has_pending_transfer():
                 return DistScheduleOutput()
 
-            # Case 2.2: Prefill is actually free. Schedule once for prefill.
+            # Case 2.2: No KV cache transfer. Schedule once for prefill.
             metadata, output = self._schedule_prefill()
             return DistScheduleOutput(prefill_schedule=(metadata, output), )
 
-        # Case 3: Prefill is occupied, but decode is not.
-        if not self.prefilling and self.decoding:
+        # Case 3: Decode is free, but prefill is in progress.
+        if self.is_prefill_in_progress and not self.is_decode_in_progress:
             _decode_schedule = self._schedule_decode(transfer_new_blocks=False)
             (metadata, output, send_blocks, recv_blocks) = _decode_schedule
 
@@ -205,7 +209,6 @@ class DistScheduler:
             )
 
         # Case 4: Nothing is happening. Schedule both prefill and decode.
-        # if not self.prefilling and not self.decoding:
         prefill_metadata, prefill_output = self._schedule_prefill()
         (decode_metadata, decode_output, send_blocks,
          recv_blocks) = self._schedule_decode(transfer_new_blocks=False)
