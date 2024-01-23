@@ -228,6 +228,7 @@ class _AsyncLLMEngine(LLMEngine):
                 "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
                 "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
                 "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+                # FIXME: Add transfer block event.
             }
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,
@@ -319,7 +320,6 @@ class _AsyncLLMEngine(LLMEngine):
         """Runs the given method on all workers in the given worker group."""
         assert self.parallel_config.is_disaggregate
 
-        coros = []
         if driver_args is None:
             driver_args = args
         if driver_kwargs is None:

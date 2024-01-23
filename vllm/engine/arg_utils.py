@@ -37,6 +37,11 @@ class EngineArgs:
     max_context_len_to_capture: int = 8192
     is_disaggregate: bool = False
 
+    # FIXME: (Hack) bypass the engine args validation for the dummy LLM.
+    engine_use_ray: bool = False
+    disable_log_requests: bool = False
+    max_log_len: Optional[int] = None
+
     def __post_init__(self):
         if self.tokenizer is None:
             self.tokenizer = self.model

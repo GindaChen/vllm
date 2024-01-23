@@ -83,6 +83,8 @@ class LLM:
         max_context_len_to_capture: int = 8192,
         is_disaggregate: bool = False,
         pipeline_parallel_size: int = 1,
+        is_dummy_llm:
+        bool = False,  # FIXME: (Hack) do not let llm engine initialized
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -106,8 +108,11 @@ class LLM:
             pipeline_parallel_size=pipeline_parallel_size,
             **kwargs,
         )
-        self.llm_engine = LLMEngine.from_engine_args(engine_args)
+        self.engine_args = engine_args
         self.request_counter = Counter()
+        if is_dummy_llm:
+            return
+        self.llm_engine = LLMEngine.from_engine_args(engine_args)
 
     def get_tokenizer(
             self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
