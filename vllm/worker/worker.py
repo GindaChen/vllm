@@ -208,7 +208,8 @@ class Worker:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
 
         # Transfer blocks from prefill worker to this worker (if any)
-        self.transfer_kv_cache(send_blocks=send_blocks, recv_blocks=recv_blocks)
+        self.transfer_kv_cache(send_blocks=send_blocks,
+                               recv_blocks=recv_blocks)
 
         # Perform cache swapping
         num_seq_groups = len(seq_group_metadata_list)

@@ -9,9 +9,9 @@ from vllm.sequence import SequenceGroup, Sequence, SequenceGroupMetadata
 @dataclasses.dataclass
 class DistScheduleOutput:
     prefill_schedule: Tuple[List[SequenceGroupMetadata],
-                            SchedulerOutputs] = None
+                            SchedulerOutputs] = ([], None)
     decode_schedule: Tuple[List[SequenceGroupMetadata],
-                           SchedulerOutputs] = None
+                           SchedulerOutputs] = ([], None)
     # FIXME: Is the type actually correct? also need to
     #  assume send / recv blocks are one-to-one mapping
     send_blocks: List[int] = None
