@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Union, Iterable, List, Tuple
+from typing import Union, Iterable, List, Tuple, Dict
 
 from vllm.config import SchedulerConfig, CacheConfig
 from vllm.core.scheduler import Scheduler, SchedulerOutputs

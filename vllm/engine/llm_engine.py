@@ -714,6 +714,8 @@ class LLMEngine:
         return request_outputs
 
     def run_engine_disaggregate(self):
+        # This is assuming using the old scheduler not the new DistScheduler.
+        assert isinstance(self.scheduler, Scheduler)
         results = []
 
         # Run one prefill.

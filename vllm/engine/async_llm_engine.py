@@ -205,6 +205,79 @@ class _AsyncLLMEngine(LLMEngine):
 
         return self._process_model_outputs(output, scheduler_outputs)
 
+    async def _schedule_dist_workers(
+            self, dist_output: DistScheduleOutput,
+            is_prefill: bool) -> Tuple[List[RequestOutput], bool]:
+
+        # See the DistScheduler.schedule() as of how the scheduling actually happened
+        # to avoid complex prefill / decode communication logic.
+        if is_prefill:
+            seq_group_metadata_list = dist_output.prefill_metadata
+            scheduler_outputs = dist_output.prefill_output
+            worker_group = self.prefill_workers
+        else:
+            seq_group_metadata_list = dist_output.decode_metadata
+            scheduler_outputs = dist_output.decode_output
+            worker_group = self.decode_workers
+
+        # Invoke execute model
+        output = []
+        if not scheduler_outputs.is_empty():
+            data = {
+                "seq_group_metadata_list": seq_group_metadata_list,
+                "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+            }
+            all_outputs = await self._run_dist_worker_group_async(
+                worker_group,
+                "execute_model",
+                **data,
+            )
+            output = all_outputs[0]
+
+        step_output = self._process_model_outputs(output, scheduler_outputs)
+        return step_output, is_prefill
+
+    async def _step_disagg_async(self) -> List[RequestOutput]:
+        assert self.parallel_config.is_disaggregate
+
+        scheduler: DistScheduler = self.scheduler
+        assert isinstance(scheduler, DistScheduler)
+
+        scheduler_outputs: DistScheduleOutput = scheduler.schedule()
+        # TODO: Schedule the prefill and decode workers to do stuff, if any.
+        # TODO: The future should return a tuple (output, is_prefill).
+        # FIXME: Don't execute if the output for prefill / decode is empty.
+        prefill_future = self._schedule_dist_workers(scheduler_outputs,
+                                                     is_prefill=True)
+        decode_future = self._schedule_dist_workers(scheduler_outputs,
+                                                    is_prefill=False)
+
+        if prefill_future:
+            self.pending_futures.add(prefill_future)
+        if decode_future:
+            self.pending_futures.add(decode_future)
+
+        if not self.pending_futures:
+            return []
+            # TODO: What to return to the caller? Nothing?
+            a = scheduler_outputs.prefill_output.ignored_seq_groups
+            b = scheduler_outputs.decode_output.ignored_seq_groups
+            return a + b
+
+        finished, pending = await asyncio.wait(
+            self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
+        self.pending_futures = pending
+
+        output, is_prefill = await finished.pop()
+        if is_prefill:
+            scheduler.on_prefill_finish()
+        else:
+            scheduler.on_decode_finish()
+
+        return output
+
     async def _run_workers_async(
         self,
         method: str,
