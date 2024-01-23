@@ -8,6 +8,7 @@ from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
 
 from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
+from vllm.core.dist_scheduler import DistScheduler
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.metrics import record_metrics
@@ -124,7 +125,10 @@ class LLMEngine:
         self._init_cache()
 
         # Create the scheduler.
-        self.scheduler = Scheduler(scheduler_config, cache_config)
+        if self.parallel_config.is_disaggregate:
+            self.scheduler = DistScheduler(scheduler_config, cache_config)
+        else:
+            self.scheduler = Scheduler(scheduler_config, cache_config)
 
         # Logging.
         self.last_logging_time = 0.0
@@ -1031,6 +1035,9 @@ class LLMEngine:
         No locality assumption is made.
         """
 
+        driver_args = driver_args if driver_args is not None else args
+        driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
+
         def _is_local(worker) -> bool:
             """Returns true if the worker is a local worker (wrt the driver)."""
             return getattr(worker, 'is_driver_worker', False)
@@ -1060,8 +1067,6 @@ class LLMEngine:
             _execute(worker, method, *args, **kwargs)
             for worker in rest_workers
         ]
-        driver_args = driver_args if driver_args is not None else args
-        driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
 
         # Start the lead worker after all the ray workers.
         lead_worker_output = _execute(lead_worker, method, *driver_args,
