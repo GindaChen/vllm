@@ -176,6 +176,9 @@ class Worker:
         responsible for prefill, then send; otherwise, receive.
         """
 
+        if not send_blocks and not recv_blocks:
+            return
+
         def is_prefill_worker():
             leader_rank = get_pipeline_model_parallel_first_rank()
             rank = torch.distributed.get_rank()
@@ -198,8 +201,16 @@ class Worker:
         blocks_to_swap_in: Optional[Dict[int, int]] = None,
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
+        # TODO: Decouple data transfer from the send/recv logic.
+        send_blocks=None,
+        recv_blocks=None,
     ) -> Optional[SamplerOutput]:
         # FIXME: (hack) pre-execution metadata from driver node to this worker.
+
+        # Transfer blocks from prefill worker to this worker (if any)
+        self.transfer_kv_cache(send_blocks=send_blocks, recv_blocks=recv_blocks)
+
+        # Perform cache swapping
         num_seq_groups = len(seq_group_metadata_list)
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
@@ -207,6 +218,7 @@ class Worker:
         if num_seq_groups == 0:
             return {}
 
+        # Execute the model in the same tensor-parallel group.
         lead_worker_rank = get_tensor_model_parallel_src_rank()
         group = get_tensor_model_parallel_group()
 
