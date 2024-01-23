@@ -1,10 +1,11 @@
+import asyncio
 import copy
 import traceback
 from collections import defaultdict
 import os
 import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
-                    Union)
+                    Union, Coroutine, Set)
 
 from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
@@ -112,11 +113,12 @@ class LLMEngine:
         else:
             self._init_workers()
 
+        # FIXME: Brutally separated prefill and decode worker.
         if self.parallel_config.is_disaggregate:
             N = self.parallel_config.tensor_parallel_size
             N = N - 1  # Excluding the driver worker, assuming driver worker works on prefill.
-            prefill_workers, decode_workers = self.workers[:N], self.workers[
-                N:]
+            workers = self.workers
+            prefill_workers, decode_workers = workers[:N], workers[N:]
             prefill_workers = [self.driver_worker] + prefill_workers
             self.prefill_workers, self.decode_workers = prefill_workers, decode_workers
             pass
@@ -136,6 +138,10 @@ class LLMEngine:
         self.num_prompt_tokens: List[Tuple[float, int]] = []
         # List of (timestamp, num_tokens)
         self.num_generation_tokens: List[Tuple[float, int]] = []
+
+        # Use for async to record the active working set
+        # TODO: Rename to active_working_set? active_working_coros?
+        self.pending_futures: Set[Coroutine] = set()
 
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
