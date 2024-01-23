@@ -169,7 +169,9 @@ class Worker:
                 event.wait()
 
     # FIXME: (hack) Hack the way out to identify prefill/decode role of the worker.
-    def transfer_kv_cache(self, send_blocks: List[int] = None, recv_blocks: List[int] = None):
+    def transfer_kv_cache(self,
+                          send_blocks: List[int] = None,
+                          recv_blocks: List[int] = None):
         """Migrate KV cache from prefill to decode. If the worker is
         responsible for prefill, then send; otherwise, receive.
         """
