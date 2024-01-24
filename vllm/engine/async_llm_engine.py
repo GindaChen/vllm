@@ -207,10 +207,11 @@ class _AsyncLLMEngine(LLMEngine):
 
     async def _invoke_dist_workers(
             self, dist_output: DistScheduleOutput,
-            is_prefill: bool) -> Tuple[List[RequestOutput], bool]:
+            is_prefill: bool) -> Tuple[List[RequestOutput], bool, bool]:
 
         # See the DistScheduler.schedule() as of how the scheduling actually happened
         # to avoid complex prefill / decode communication logic.
+        is_transfer = dist_output.is_transfer_schedule
         if is_prefill:
             seq_group_metadata_list = dist_output.prefill_metadata
             scheduler_outputs = dist_output.prefill_output
@@ -232,7 +233,9 @@ class _AsyncLLMEngine(LLMEngine):
                 "send_blocks": dist_output.send_blocks,
                 "recv_blocks": dist_output.recv_blocks,
             }
-            logger.info(f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with {data = }.")
+            logger.info(
+                f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with {data = }."
+            )
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,
                 "execute_model",
@@ -241,7 +244,7 @@ class _AsyncLLMEngine(LLMEngine):
             output = all_outputs[0]
 
         step_output = self._process_model_outputs(output, scheduler_outputs)
-        return step_output, is_prefill
+        return step_output, is_prefill, is_transfer
 
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
         # FIXME: Hack - decouple the concept of "running" vs "has output"
@@ -257,18 +260,15 @@ class _AsyncLLMEngine(LLMEngine):
         logger.info(f"Scheduler outputs properties: \n"
                     f"{scheduler_outputs.is_transfer_schedule = },\n"
                     f"{scheduler_outputs.has_prefill_schedule = },\n"
-                    f"{scheduler_outputs.has_decode_schedule = },\n"
-                    )
+                    f"{scheduler_outputs.has_decode_schedule = },\n")
         logger.info(f"Prefill scheduler: \n"
                     f"{len(scheduler.prefill_scheduler.waiting) = } \n"
                     f"{len(scheduler.prefill_scheduler.running) = } \n"
-                    f"{len(scheduler.prefill_scheduler.swapped) = } \n"
-                    )
+                    f"{len(scheduler.prefill_scheduler.swapped) = } \n")
         logger.info(f"Decode scheduler: \n"
                     f"{len(scheduler.decode_scheduler.waiting) = } \n"
                     f"{len(scheduler.decode_scheduler.running) = } \n"
-                    f"{len(scheduler.decode_scheduler.swapped) = } \n"
-                    )
+                    f"{len(scheduler.decode_scheduler.swapped) = } \n")
 
         prefill_future = None
         decode_future = None
@@ -314,12 +314,12 @@ class _AsyncLLMEngine(LLMEngine):
         # Prepare return result.
         result = []
         for future in finished:
-            output, is_prefill = await future
+            output, is_prefill, is_transfer = await future
             logger.info(f"Accepted a finished task {is_prefill = }.")
             if is_prefill:
-                scheduler.on_prefill_finish()
+                scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
-                scheduler.on_decode_finish()
+                scheduler.on_decode_finish(is_transfer=is_transfer)
             result += output
         logger.info(
             f"Finished step_dist_async() step {self.iteration_counter}.")
@@ -536,7 +536,8 @@ class AsyncLLMEngine:
             is_running = len(request_outputs) > 0
         else:
             if self.engine.parallel_config.is_disaggregate:
-                request_outputs, is_running = await self.engine.step_dist_async()
+                request_outputs, is_running = await self.engine.step_dist_async(
+                )
             else:
                 request_outputs = await self.engine.step_async()
                 is_running = len(request_outputs) > 0

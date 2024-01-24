@@ -159,18 +159,30 @@ class DistScheduler:
 
         return metadata, output, send_blocks, recv_blocks
 
-    def on_prefill_finish(self):
+    def on_prefill_finish(self, is_transfer: bool = False):
         """Function passing into the prefill_scheduler."""
         assert self.is_prefill_in_progress, "Prefilling is not ongoing."
         self.is_prefill_in_progress = False
 
+        # Once prefill worker pool finish up a KV cache transfer,
+        # remove the sequence from the prefill scheduler.
+        if is_transfer:
+            # Remove the requests from prefill.
+            self.prefill_scheduler.abort_seq_group(self.pending_migration_requests)
+            self.pending_migration_requests = None
+            return
+
+        # Otherwise, it is a normal prefill step finishing.
         # Forward the requests to the decode scheduler.
         for seq_group in self._in_progress_prefill_requests:
-            # TODO: Standardize the special handling of the sequence group.
             assert isinstance(seq_group, SequenceGroup)
             # Rewind the state of the sequences within the sequence group
             seq_group.hacky_rewind(SequenceStatus.WAITING)
             self.decode_scheduler.add_seq_group(seq_group)
+            # TODO: Suppress the seq_group running prefill.
+            #  We currently do this after on_decode_finish,
+            #  which also removes the sequence from prefill scheduler.
+
         # Update the blocks used in these prefill requests.
         for metadata in self._in_progress_prefill_requests_metadatas:
             block_tables = metadata.block_tables
@@ -179,9 +191,10 @@ class DistScheduler:
         # Clear the stateful states for prefill
         self._in_progress_prefill_requests = []
         self._in_progress_prefill_requests_metadatas = []
+
         return
 
-    def on_decode_finish(self):
+    def on_decode_finish(self, is_transfer: bool = False):
         """Function passing into the decode_scheduler."""
         assert self.is_decode_in_progress, "Decoding is not ongoing."
         self.is_decode_in_progress = False
