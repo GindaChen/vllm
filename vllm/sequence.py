@@ -249,11 +249,20 @@ class SequenceGroup:
         self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
 
-    def hacky_rewind(self, status: SequenceStatus) -> None:
+    def hacky_rewind(self) -> None:
         # FIXME: Hack the sequence group to rewind every sequence back to a certain state.
         """Rewind the sequence group to the state."""
-        for _, seq in self.seqs_dict.items():
-            seq.status = status
+        for key, seq in self.seqs_dict.items():
+            assert isinstance(seq, Sequence)
+            new_seq = Sequence(
+                seq_id=seq.seq_id,
+                prompt=seq.prompt,
+                prompt_token_ids=seq.data.prompt_token_ids,
+                block_size=seq.block_size,
+            )
+            self.seqs_dict[key] = new_seq
+
+
         return
 
     @property

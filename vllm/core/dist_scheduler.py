@@ -174,7 +174,7 @@ class DistScheduler:
         for seq_group in self._in_progress_prefill_requests:
             assert isinstance(seq_group, SequenceGroup)
             # Rewind the state of the sequences within the sequence group
-            seq_group.hacky_rewind(SequenceStatus.WAITING)
+            seq_group.hacky_rewind()
             self.decode_scheduler.add_seq_group(seq_group)
             # TODO: Suppress the seq_group running prefill.
             #  We currently do this after on_decode_finish,
