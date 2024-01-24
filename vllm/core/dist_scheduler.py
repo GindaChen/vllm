@@ -3,7 +3,7 @@ from typing import Union, Iterable, List, Tuple, Dict
 
 from vllm.config import SchedulerConfig, CacheConfig
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
-from vllm.sequence import SequenceGroup, Sequence, SequenceGroupMetadata
+from vllm.sequence import SequenceGroup, Sequence, SequenceGroupMetadata, SequenceStatus
 
 
 @dataclasses.dataclass
@@ -162,8 +162,11 @@ class DistScheduler:
         self.is_prefill_in_progress = False
 
         # Forward the requests to the decode scheduler.
-        # TODO: May need to pool these requests in a queue in the dest scheduler.
         for seq_group in self._in_progress_prefill_requests:
+            # TODO: Standardize the special handling of the sequence group.
+            assert isinstance(seq_group, SequenceGroup)
+            # Rewind the state of the sequences within the sequence group
+            seq_group.hacky_rewind(SequenceStatus.WAITING)
             self.decode_scheduler.add_seq_group(seq_group)
         # Update the blocks used in these prefill requests.
         for metadata in self._in_progress_prefill_requests_metadatas:

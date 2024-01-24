@@ -242,12 +242,19 @@ class SequenceGroup:
         arrival_time: float,
         prefix: Optional[Prefix] = None,
     ) -> None:
-        self.request_id = request_id
-        self.seqs_dict = {seq.seq_id: seq for seq in seqs}
+        self.request_id: str = request_id
+        self.seqs_dict: Dict[int, Sequence] = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
         self.arrival_time = arrival_time
         self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
+
+    def hacky_rewind(self, status: SequenceStatus) -> None:
+        # FIXME: Hack the sequence group to rewind every sequence back to a certain state.
+        """Rewind the sequence group to the state."""
+        for _, seq in self.seqs_dict.items():
+            seq.status = status
+        return
 
     @property
     def prompt(self) -> str:
