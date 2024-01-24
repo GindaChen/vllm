@@ -202,7 +202,7 @@ class DistScheduler:
 
         # TODO: Simply assuming the decode always drains the migration.
         self.prefill_scheduler.abort_seq_group(self.pending_migration_requests)
-        self.pending_migration_requests = None
+        self.pending_migration_requests = []
         return
 
     def has_pending_transfer(self):

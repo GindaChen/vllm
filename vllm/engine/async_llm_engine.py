@@ -1,4 +1,5 @@
 import asyncio
+import pprint
 import time
 from functools import partial
 from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
@@ -234,7 +235,7 @@ class _AsyncLLMEngine(LLMEngine):
                 "recv_blocks": dist_output.recv_blocks,
             }
             logger.info(
-                f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with data: {data}"
+                f"{'Prefill pool' if is_prefill else 'Decode pool'} invoking execute_model with data: {data}"
             )
 
             all_outputs = await self._run_dist_worker_group_async(
@@ -249,7 +250,12 @@ class _AsyncLLMEngine(LLMEngine):
 
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
         # FIXME: Hack - decouple the concept of "running" vs "has output"
+
+        # Sleep 1 second
+        await asyncio.sleep(1)
+
         self.iteration_counter += 1
+        logger.info("\n-------------------\n")
         logger.info(
             f"Starting step_dist_async() step {self.iteration_counter}.")
         assert self.parallel_config.is_disaggregate
@@ -326,13 +332,14 @@ class _AsyncLLMEngine(LLMEngine):
             f"Finished step_dist_async() step {self.iteration_counter}.")
         logger.info(f"Obtain result: {result = }.")
 
-        logger.info(f"Scheduler properties: "
-                    f"{scheduler.is_prefill_in_progress = }, "
-                    f"{scheduler.is_decode_in_progress = }, "
-                    f"{scheduler._in_progress_prefill_requests = }."
-                    f"{scheduler._in_progress_prefill_requests_metadatas = }."
-                    f"{scheduler.prefill_memblocks = }."
-                    f"{scheduler.pending_migration_requests = }.")
+        logger.info(
+            f"Scheduler properties: "
+            f"{scheduler.is_prefill_in_progress = }, \n"
+            f"{scheduler.is_decode_in_progress = }, \n"
+            f"{scheduler._in_progress_prefill_requests = }, \n"
+            f"{scheduler._in_progress_prefill_requests_metadatas = }, \n"
+            f"{scheduler.prefill_memblocks = }, \n"
+            f"{scheduler.pending_migration_requests = }, \n")
 
         return result, True
 
@@ -561,6 +568,8 @@ class AsyncLLMEngine:
         has_requests_in_progress = False
         while True:
             if not has_requests_in_progress:
+                # Wait for new requests if there are no requests in progress.
+                logger.info("Waiting for new requests...")
                 await self._request_tracker.wait_for_new_requests()
             has_requests_in_progress = await self.engine_step()
             await asyncio.sleep(0)
