@@ -80,11 +80,22 @@ def initialize_cluster(
                 "serving.")
         # Connect to a ray cluster.
         if is_hip():
-            ray.init(address=ray_address,
-                     ignore_reinit_error=True,
-                     num_gpus=parallel_config.world_size)
+            ray.init(
+                address=ray_address,
+                ignore_reinit_error=True,
+                num_gpus=parallel_config.world_size,
+                local_mode=
+                True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
+            )
+            logger.debug(f"Ray init with debugging enabled: {ray_address}")
         else:
-            ray.init(address=ray_address, ignore_reinit_error=True)
+            ray.init(
+                address=ray_address,
+                ignore_reinit_error=True,
+                local_mode=
+                True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
+            )
+            logger.debug(f"Ray init with debugging enabled: {ray_address}")
 
     if not parallel_config.worker_use_ray:
         assert parallel_config.world_size == 1, (

@@ -322,7 +322,7 @@ class _AsyncLLMEngine(LLMEngine):
         result = []
         for future in finished:
             output, is_prefill, is_transfer = await future
-            logger.info(f"Accepted a finished task {is_prefill = }.")
+            logger.info(f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
@@ -333,7 +333,7 @@ class _AsyncLLMEngine(LLMEngine):
         logger.info(f"Obtain result: {result = }.")
 
         logger.info(
-            f"Scheduler properties: "
+            f"Scheduler properties: \n"
             f"{scheduler.is_prefill_in_progress = }, \n"
             f"{scheduler.is_decode_in_progress = }, \n"
             f"{scheduler._in_progress_prefill_requests = }, \n"
