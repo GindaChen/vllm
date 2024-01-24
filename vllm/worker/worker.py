@@ -231,20 +231,22 @@ class Worker:
         debug_pront(
             f"Worker {self.rank} executes model with {seq_group_metadata_list = }"
         )
-        debug_pront(f"Worker {self.rank} executes model with {num_seq_groups = }")
+        debug_pront(
+            f"Worker {self.rank} executes model with {num_seq_groups = }")
         if num_seq_groups == 0:
             return {}
 
         # Execute the model in the same tensor-parallel group.
         lead_worker_rank = get_tensor_model_parallel_src_rank()
         group = get_tensor_model_parallel_group()
-        debug_pront(f"Worker {self.rank} executes model with {lead_worker_rank = } "
-              f"and {torch.distributed.get_process_group_ranks(group) = }")
+        debug_pront(
+            f"Worker {self.rank} executes model with {lead_worker_rank = } "
+            f"and {torch.distributed.get_process_group_ranks(group) = }")
         debug_pront(f"Worker {self.rank} property: \n"
-              f"{torch.distributed.get_rank() = }\n"
-              f"{self.rank = }\n"
-              f"{self.is_driver_worker = }\n"
-              f"{self.model_runner.is_driver_worker = }\n")
+                    f"{torch.distributed.get_rank() = }\n"
+                    f"{self.rank = }\n"
+                    f"{self.is_driver_worker = }\n"
+                    f"{self.model_runner.is_driver_worker = }\n")
         debug_slept(1)
 
         output = self.model_runner.execute_model(

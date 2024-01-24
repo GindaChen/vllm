@@ -30,7 +30,8 @@ async def main():
     result_generators = []
     for request_id, prompt in enumerate(prompts):
         # FIXME: HACK - we assume engine always returns async stream.
-        gen: AsyncStream = engine.generate(prompt, sampling_params, str(request_id))
+        gen: AsyncStream = engine.generate(prompt, sampling_params,
+                                           str(request_id))
         result_generators.append(gen)
 
     # Async get whatever is available from the `result_generators`
@@ -38,16 +39,19 @@ async def main():
     final_output = []
     while result_generators:
         # Run all generators concurrently and wait for the first one to complete
-        done, pending = await asyncio.wait(
-            [asyncio.create_task(gen.__anext__()) for gen in result_generators],
-            return_when=asyncio.FIRST_COMPLETED
-        )
+        done, pending = await asyncio.wait([
+            asyncio.create_task(gen.__anext__()) for gen in result_generators
+        ],
+                                           return_when=asyncio.FIRST_COMPLETED)
 
         for task in done:
             try:
                 result = task.result()
+                assert isinstance(result, RequestOutput)
                 # Process the result here
-                print(f"[User] At user level, received output for request: {result = }")
+                output_text = " ".join([i.text for i in result.outputs])
+                text = f"[{result.request_id} ({len(result.outputs)})] {result.prompt} {output_text}"
+                print(text)
             except StopAsyncIteration:
                 # This generator is exhausted, remove it
                 result_generators.remove(task.get_coro().cr_await)
