@@ -230,6 +230,7 @@ class ModelRunner:
 
                 seq_len = seq_data.get_len()
                 print(f"Get {seq_len = }")
+                print(f"Get {self.sliding_window = }")
                 position = seq_len - 1
                 input_positions.append([position])
 
