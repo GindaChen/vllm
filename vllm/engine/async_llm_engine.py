@@ -234,8 +234,9 @@ class _AsyncLLMEngine(LLMEngine):
                 "recv_blocks": dist_output.recv_blocks,
             }
             logger.info(
-                f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with {data = }."
+                f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with data: {data}"
             )
+
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,
                 "execute_model",
