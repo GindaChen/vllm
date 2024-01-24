@@ -167,10 +167,6 @@ class DistScheduler:
         # Once prefill worker pool finish up a KV cache transfer,
         # remove the sequence from the prefill scheduler.
         if is_transfer:
-            # Remove the requests from prefill.
-            self.prefill_scheduler.abort_seq_group(
-                self.pending_migration_requests)
-            self.pending_migration_requests = []
             return
 
         # Otherwise, it is a normal prefill step finishing.

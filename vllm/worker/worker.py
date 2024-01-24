@@ -226,6 +226,8 @@ class Worker:
 
         # If there is no input, we don't need to execute the model.
         num_seq_groups = len(seq_group_metadata_list)
+        print(f"Worker {self.rank} executes model with {seq_group_metadata_list = }")
+        print(f"Worker {self.rank} executes model with {num_seq_groups = }")
         if num_seq_groups == 0:
             return {}
 
