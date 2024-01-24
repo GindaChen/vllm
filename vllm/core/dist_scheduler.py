@@ -53,13 +53,13 @@ class DistScheduler:
         self.is_prefill_in_progress = False
         self.is_decode_in_progress = False
 
-        self.ongoing_prefill_requests: 'Iterable[SequenceGroup]' = []
-        self.ongoing_prefill_requests_meta: 'List[SequenceGroupMetadata]' = []
+        self._in_progress_prefill_requests: 'Iterable[SequenceGroup]' = []
+        self._in_progress_prefill_requests_metadatas: 'List[SequenceGroupMetadata]' = []
 
         # Tracking the KV cache in the prefill workers.
         # Maps a sequence id to a list of physical block ids.
         # i.e.: Sequence.seq_id -> [BlockID(int)]
-        self.prefill_request_blocks: 'Dict[int, List[int]]' = {}
+        self.prefill_memblocks: 'Dict[int, List[int]]' = {}
 
         # Requests scheduled for migration.
         # TODO: (Rename) migration requests
@@ -110,8 +110,8 @@ class DistScheduler:
         output: SchedulerOutputs = _result[1]
         if metadatas:
             self.is_prefill_in_progress = True
-        self.ongoing_prefill_requests = output.scheduled_seq_groups
-        self.ongoing_prefill_requests_meta = metadatas
+        self._in_progress_prefill_requests = output.scheduled_seq_groups
+        self._in_progress_prefill_requests_metadatas = metadatas
         return metadatas, output
 
     # TODO: The return type is super complex now...
@@ -137,7 +137,7 @@ class DistScheduler:
         if should_transfer_new_blocks:
             for item in metadata:
                 # FIXME: The SequenceGroupMetadata should have tracked what metadata the prefill engine is using.
-                prefill_blocks = self.prefill_request_blocks[item.request_id]
+                prefill_blocks = self.prefill_memblocks[item.request_id]
                 decode_blocks = item.block_tables
 
                 for seq_id, blocks in prefill_blocks.items():
@@ -155,21 +155,21 @@ class DistScheduler:
 
         # Forward the requests to the decode scheduler.
         # TODO: May need to pool these requests in a queue in the dest scheduler.
-        for seq_group in self.ongoing_prefill_requests:
+        for seq_group in self._in_progress_prefill_requests:
             self.decode_scheduler.add_seq_group(seq_group)
         # Update the blocks used in these prefill requests.
-        for metadata in self.ongoing_prefill_requests_meta:
+        for metadata in self._in_progress_prefill_requests_metadatas:
             # FIXME: Retrieve the blocks from the prefill workers.
             block_tables = metadata.block_tables
             assert len(
                 block_tables
             ) == 1, "Only one sequence should appear in prefill (hence one block table)."
             blocks = list(block_tables.values())[0]
-            self.prefill_request_blocks[metadata.request_id] = blocks
+            self.prefill_memblocks[metadata.request_id] = blocks
 
         # Clear the stateful states for prefill
-        self.ongoing_prefill_requests = []
-        self.ongoing_prefill_requests_meta = []
+        self._in_progress_prefill_requests = []
+        self._in_progress_prefill_requests_metadatas = []
         return
 
     def on_decode_finish(self):

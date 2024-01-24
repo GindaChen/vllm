@@ -270,6 +270,7 @@ class _AsyncLLMEngine(LLMEngine):
             self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
         self.pending_futures = pending
 
+        # FIXME: `finished` can be multiple - run a loop!!
         output, is_prefill = await finished.pop()
         if is_prefill:
             scheduler.on_prefill_finish()
