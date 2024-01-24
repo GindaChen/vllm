@@ -1,5 +1,6 @@
 """A GPU worker class."""
 import os
+from time import sleep
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -243,6 +244,7 @@ class Worker:
               f"{self.rank = }\n"
               f"{self.is_driver_worker = }\n"
               f"{self.model_runner.is_driver_worker = }\n")
+        sleep(1)
 
         output = self.model_runner.execute_model(
             seq_group_metadata_list,
