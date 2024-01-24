@@ -242,7 +242,8 @@ class _AsyncLLMEngine(LLMEngine):
         step_output = self._process_model_outputs(output, scheduler_outputs)
         return step_output, is_prefill
 
-    async def step_dist_async(self) -> List[RequestOutput]:
+    async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
+        # FIXME: Hack - decouple the concept of "running" vs "has output"
         self.iteration_counter += 1
         logger.info(
             f"Starting step_dist_async() step {self.iteration_counter}.")
@@ -292,7 +293,7 @@ class _AsyncLLMEngine(LLMEngine):
             self.pending_futures.add(decode_future)
 
         if not self.pending_futures:
-            return []
+            return [], False
 
         finished, pending = await asyncio.wait(
             self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
@@ -320,7 +321,7 @@ class _AsyncLLMEngine(LLMEngine):
                     f"{scheduler.prefill_memblocks = }."
                     f"{scheduler.pending_migration_requests = }.")
 
-        return result
+        return result, True
 
     async def _run_workers_async(
         self,
@@ -520,18 +521,20 @@ class AsyncLLMEngine:
 
         if self.engine_use_ray:
             request_outputs = await self.engine.step.remote()
+            is_running = len(request_outputs) > 0
         else:
             if self.engine.parallel_config.is_disaggregate:
-                request_outputs = await self.engine.step_dist_async()
+                request_outputs, is_running = await self.engine.step_dist_async()
             else:
                 request_outputs = await self.engine.step_async()
+                is_running = len(request_outputs) > 0
 
         # Put the outputs into the corresponding streams.
         for request_output in request_outputs:
             self._request_tracker.process_request_output(
                 request_output, verbose=self.log_requests)
 
-        return len(request_outputs) > 0
+        return is_running
 
     async def _engine_abort(self, request_ids: Iterable[str]):
         if self.engine_use_ray:
