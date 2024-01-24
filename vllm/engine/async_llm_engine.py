@@ -308,6 +308,18 @@ class _AsyncLLMEngine(LLMEngine):
             else:
                 scheduler.on_decode_finish()
             result += output
+        logger.info(f"Finished step_dist_async() step {self.iteration_counter}.")
+        logger.info(f"Obtain result: {result = }.")
+
+        logger.info(f"Scheduler properties: "
+                    f"{scheduler.is_prefill_in_progress = }, "
+                    f"{scheduler.is_decode_in_progress = }, "
+                    f"{scheduler._in_progress_prefill_requests = }."
+                    f"{scheduler._in_progress_prefill_requests_metadatas = }."
+                    f"{scheduler.prefill_memblocks = }."
+                    f"{scheduler.pending_migration_requests = }."
+                    )
+
 
         return result
 
