@@ -8,7 +8,7 @@ from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.model_executor.parallel_utils.parallel_state import get_pipeline_model_parallel_next_rank, \
     get_pipeline_model_parallel_prev_rank
-from vllm.utils import in_wsl
+from vllm.utils import in_wsl, debug_pront
 
 logger = init_logger(__name__)
 
@@ -138,43 +138,37 @@ class CacheEngine:
     def send_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
-        print(f"Sending blocks {block_ids = } to {rank = }")
-        logger.debug(f"Sending blocks {block_ids = } to {rank = }")
+        debug_pront(f"Sending blocks {block_ids = } to {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
-                logger.debug(f"Sending block: {block_id} from layer {i}")
+                debug_pront(f"Sending block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.isend(a, dst=rank)
                     tasks.append(x)
                 pass
         for task in tasks:
-            logger.debug(f"Waiting for task: {task}")
+            debug_pront(f"Waiting for task: {task}")
             task.wait()
-        print(f"Done sending blocks {block_ids = } to {rank = }")
-        logger.debug(f"Done sending blocks {block_ids = } to {rank = }")
+        debug_pront(f"Done sending blocks {block_ids = } to {rank = }")
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
-        print(f"Receiving blocks {block_ids = } from {rank = }")
-        logger.debug(f"Receiving blocks {block_ids = } from {rank = }")
+        debug_pront(f"Receiving blocks {block_ids = } from {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
-                print(f"Receiving block: {block_id} from layer {i}")
-                logger.debug(f"Receiving block: {block_id} from layer {i}")
+                debug_pront(f"Receiving block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.irecv(a, src=rank)
                     tasks.append(x)
                 pass
         for i, task in enumerate(tasks):
-            print(f"Waiting for task: {i}")
-            logger.debug(f"Waiting for task: {i}")
+            debug_pront(f"Waiting for task: {i}")
             task.wait()
-        print(f"Done receiving blocks {block_ids = } from {rank = }")
-        logger.debug(f"Done receiving blocks {block_ids = } from {rank = }")
+        debug_pront(f"Done receiving blocks {block_ids = } from {rank = }")
         return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:

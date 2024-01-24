@@ -1,5 +1,4 @@
 import asyncio
-import pprint
 import time
 from functools import partial
 from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
@@ -13,6 +12,7 @@ from vllm.engine.ray_utils import initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
+from vllm.utils import debug_pront
 
 logger = init_logger(__name__)
 
@@ -234,7 +234,7 @@ class _AsyncLLMEngine(LLMEngine):
                 "send_blocks": dist_output.send_blocks,
                 "recv_blocks": dist_output.recv_blocks,
             }
-            logger.info(
+            debug_pront(
                 f"{'Prefill pool' if is_prefill else 'Decode pool'} invoking execute_model with data: {data}"
             )
 
@@ -252,8 +252,8 @@ class _AsyncLLMEngine(LLMEngine):
         # FIXME: Hack - decouple the concept of "running" vs "has output"
 
         self.iteration_counter += 1
-        logger.info("\n-------------------\n")
-        logger.info(
+        debug_pront("\n-------------------\n")
+        debug_pront(
             f"Starting step_dist_async() step {self.iteration_counter}.")
         assert self.parallel_config.is_disaggregate
 
@@ -261,15 +261,15 @@ class _AsyncLLMEngine(LLMEngine):
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        logger.info(f"Scheduler outputs properties: \n"
+        debug_pront(f"Scheduler outputs properties: \n"
                     f"{scheduler_outputs.is_transfer_schedule = },\n"
                     f"{scheduler_outputs.has_prefill_schedule = },\n"
                     f"{scheduler_outputs.has_decode_schedule = },\n")
-        logger.info(f"Prefill scheduler: \n"
+        debug_pront(f"Prefill scheduler: \n"
                     f"{len(scheduler.prefill_scheduler.waiting) = } \n"
                     f"{len(scheduler.prefill_scheduler.running) = } \n"
                     f"{len(scheduler.prefill_scheduler.swapped) = } \n")
-        logger.info(f"Decode scheduler: \n"
+        debug_pront(f"Decode scheduler: \n"
                     f"{len(scheduler.decode_scheduler.waiting) = } \n"
                     f"{len(scheduler.decode_scheduler.running) = } \n"
                     f"{len(scheduler.decode_scheduler.swapped) = } \n")
@@ -281,7 +281,7 @@ class _AsyncLLMEngine(LLMEngine):
         if scheduler_outputs.is_transfer_schedule:
             assert scheduler.is_prefill_in_progress and scheduler.is_decode_in_progress, \
                 "Block migration must schedule both prefill and decode."
-            logger.info(f"Block migration is invoked.")
+            debug_pront(f"Block migration is invoked.")
             prefill_future = self._invoke_dist_workers(scheduler_outputs,
                                                        is_prefill=True)
             decode_future = self._invoke_dist_workers(scheduler_outputs,
@@ -292,13 +292,13 @@ class _AsyncLLMEngine(LLMEngine):
             if scheduler_outputs.has_prefill_schedule:
                 assert scheduler.is_prefill_in_progress, \
                     "Prefill schedule must be invoked when prefill is in progress."
-                logger.info(f"Prefill schedule is invoked.")
+                debug_pront(f"Prefill schedule is invoked.")
                 prefill_future = self._invoke_dist_workers(scheduler_outputs,
                                                            is_prefill=True)
             if scheduler_outputs.has_decode_schedule:
                 assert scheduler.is_decode_in_progress, \
                     "Decode schedule must be invoked when decode is in progress."
-                logger.info(f"Decode schedule is invoked.")
+                debug_pront(f"Decode schedule is invoked.")
                 decode_future = self._invoke_dist_workers(scheduler_outputs,
                                                           is_prefill=False)
 
@@ -319,18 +319,18 @@ class _AsyncLLMEngine(LLMEngine):
         result = []
         for future in finished:
             output, is_prefill, is_transfer = await future
-            logger.info(
+            debug_pront(
                 f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
                 scheduler.on_decode_finish(is_transfer=is_transfer)
             result += output
-        logger.info(
+        debug_pront(
             f"Finished step_dist_async() step {self.iteration_counter}.")
-        logger.info(f"Obtain result: {result = }.")
+        debug_pront(f"Obtain result: {result = }.")
 
-        logger.info(
+        debug_pront(
             f"Scheduler properties: \n"
             f"{scheduler.is_prefill_in_progress = }, \n"
             f"{scheduler.is_decode_in_progress = }, \n"
@@ -567,7 +567,7 @@ class AsyncLLMEngine:
         while True:
             if not has_requests_in_progress:
                 # Wait for new requests if there are no requests in progress.
-                logger.info("Waiting for new requests...")
+                debug_pront("Waiting for new requests...")
                 await self._request_tracker.wait_for_new_requests()
             has_requests_in_progress = await self.engine_step()
             await asyncio.sleep(0)

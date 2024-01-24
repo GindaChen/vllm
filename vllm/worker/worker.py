@@ -16,7 +16,7 @@ from vllm.model_executor.parallel_utils.parallel_state import (
     get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
     get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
-from vllm.utils import debug_slept
+from vllm.utils import debug_slept, debug_pront
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
 
@@ -187,7 +187,7 @@ class Worker:
         if not send_blocks or not recv_blocks:
             return
 
-        print(
+        debug_pront(
             f"Worker {self.rank} executes transfer_kv_cache with {send_blocks = } and {recv_blocks = }"
         )
 
@@ -228,19 +228,19 @@ class Worker:
 
         # If there is no input, we don't need to execute the model.
         num_seq_groups = len(seq_group_metadata_list)
-        print(
+        debug_pront(
             f"Worker {self.rank} executes model with {seq_group_metadata_list = }"
         )
-        print(f"Worker {self.rank} executes model with {num_seq_groups = }")
+        debug_pront(f"Worker {self.rank} executes model with {num_seq_groups = }")
         if num_seq_groups == 0:
             return {}
 
         # Execute the model in the same tensor-parallel group.
         lead_worker_rank = get_tensor_model_parallel_src_rank()
         group = get_tensor_model_parallel_group()
-        print(f"Worker {self.rank} executes model with {lead_worker_rank = } "
+        debug_pront(f"Worker {self.rank} executes model with {lead_worker_rank = } "
               f"and {torch.distributed.get_process_group_ranks(group) = }")
-        print(f"Worker {self.rank} property: \n"
+        debug_pront(f"Worker {self.rank} property: \n"
               f"{torch.distributed.get_rank() = }\n"
               f"{self.rank = }\n"
               f"{self.is_driver_worker = }\n"
