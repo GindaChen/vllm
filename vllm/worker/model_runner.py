@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import torch.distributed
 import torch.nn as nn
 
 from vllm.config import ModelConfig, ParallelConfig, SchedulerConfig
@@ -203,6 +204,7 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
+        print(f"Inside _prepare_decode({seq_group_metadata_list=})")
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -210,27 +212,40 @@ class ModelRunner:
         context_lens: List[int] = []
         block_tables: List[List[int]] = []
 
+        print("Start iteration of the seq_group_metadata_list")
         for seq_group_metadata in seq_group_metadata_list:
+            print(f"Get {seq_group_metadata = }")
             assert not seq_group_metadata.is_prompt
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
+            print(f"Get {seq_ids = }")
             for seq_id in seq_ids:
+                print(f"Iterate on {seq_id = }")
                 seq_data = seq_group_metadata.seq_data[seq_id]
+                print(f"Get {seq_data = }")
                 generation_token = seq_data.get_last_token_id()
+                print(f"Get {generation_token = }")
                 input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
+                print(f"Get {seq_len = }")
                 position = seq_len - 1
                 input_positions.append([position])
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
+                print(f"Get {min(seq_len, self.sliding_window) = }")
+                print(f"Get {context_len = }")
                 context_lens.append(context_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                print(f"Get {block_table = }")
                 block_number = block_table[position // self.block_size]
+                print(f"Get {block_number = }")
                 block_offset = position % self.block_size
+                print(f"Get {block_offset = }")
                 slot = block_number * self.block_size + block_offset
+                print(f"Get {slot = }")
                 slot_mapping.append([slot])
 
                 if self.sliding_window is not None:
@@ -239,7 +254,11 @@ class ModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
+        print(f"Finished iteration of the seq_group_metadata_list")
         batch_size = len(input_tokens)
+        print(f"Get {batch_size = }")
+        print(f"Get {input_tokens = }")
+        print(f"Get {context_lens = }")
         max_context_len = max(context_lens)
         use_captured_graph = (
             not self.model_config.enforce_eager
@@ -396,6 +415,9 @@ class ModelRunner:
                 (input_tokens, input_positions, input_metadata, prompt_lens,
                  subquery_lens) = self._prepare_prompt(seq_group_metadata_list)
             else:
+                print(
+                    f"With {lead_worker_rank = }, Calling prepare_input_tensors({seq_group_metadata_list=})"
+                )
                 (input_tokens, input_positions, input_metadata
                  ) = self._prepare_decode(seq_group_metadata_list)
                 subquery_lens = None
@@ -458,7 +480,10 @@ class ModelRunner:
         lead_worker_rank=0,
         group=None,
     ) -> Optional[SamplerOutput]:
-
+        rank = torch.distributed.get_rank()
+        print(
+            f"Worker with rank Inside execute_model({seq_group_metadata_list=}, {kv_caches=}, {lead_worker_rank=}, {group=})"
+        )
         input_tokens, input_positions, input_metadata, sampling_metadata = (
             self.prepare_input_tensors(
                 seq_group_metadata_list,
