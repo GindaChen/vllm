@@ -203,7 +203,7 @@ class DistScheduler:
 
     def has_pending_transfer(self):
         """Indicate there are requests waiting for KV Cache transfer."""
-        return len(self.decode_scheduler.waiting) > 0
+        return self.decode_scheduler.waiting or self.pending_migration_requests
 
     def schedule(self) -> DistScheduleOutput:
         # FIXME: Suboptimal scheduling algorithm if (actual) PP > 1.
