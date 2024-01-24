@@ -416,7 +416,7 @@ class ModelRunner:
                  subquery_lens) = self._prepare_prompt(seq_group_metadata_list)
             else:
                 print(
-                    f"With {lead_worker_rank = }, Calling prepare_input_tensors({seq_group_metadata_list=})"
+                    f"With {lead_worker_rank = }, Calling prepare_input_tensors({len(seq_group_metadata_list)=})"
                 )
                 (input_tokens, input_positions, input_metadata
                  ) = self._prepare_decode(seq_group_metadata_list)
@@ -482,7 +482,7 @@ class ModelRunner:
     ) -> Optional[SamplerOutput]:
         rank = torch.distributed.get_rank()
         print(
-            f"Worker with rank Inside execute_model({seq_group_metadata_list=}, {kv_caches=}, {lead_worker_rank=}, {group=})"
+            f"Worker with {rank = } Inside execute_model({len(seq_group_metadata_list)=}, {len(kv_caches)=}, {lead_worker_rank=}, {group=})"
         )
         input_tokens, input_positions, input_metadata, sampling_metadata = (
             self.prepare_input_tensors(
