@@ -19,7 +19,7 @@ class DistScheduleOutput:
 
     @property
     def is_transfer_schedule(self):
-        return self.send_blocks and self.recv_blocks
+        return self.send_blocks is not None and self.recv_blocks is not None
 
     @property
     def has_prefill_schedule(self):

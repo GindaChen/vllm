@@ -173,8 +173,8 @@ class Scheduler:
                 waiting_seqs = seq_group.get_seqs(
                     status=SequenceStatus.WAITING)
                 assert len(waiting_seqs) == 1, (
-                    "Waiting sequence group should have only one prompt "
-                    "sequence.")
+                    f"Waiting sequence group should have only one prompt "
+                    f"sequence. Got { len(waiting_seqs) } sequences.")
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 if num_prompt_tokens > self.prompt_limit:
                     logger.warning(
