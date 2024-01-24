@@ -65,7 +65,7 @@ class SequenceData:
         self,
         prompt_token_ids: List[int],
     ) -> None:
-        self.prompt_token_ids = prompt_token_ids
+        self.prompt_token_ids: List[int] = prompt_token_ids
         self.output_token_ids: List[int] = []
         self.cumulative_logprob = 0.0
 
@@ -115,18 +115,18 @@ class Sequence:
         prompt_token_ids: List[int],
         block_size: int,
     ) -> None:
-        self.seq_id = seq_id
-        self.prompt = prompt
-        self.block_size = block_size
+        self.seq_id: int = seq_id
+        self.prompt: str = prompt
+        self.block_size: int = block_size
 
-        self.data = SequenceData(prompt_token_ids)
+        self.data: SequenceData = SequenceData(prompt_token_ids)
         self.output_logprobs: SampleLogprobs = []
-        self.output_text = ""
+        self.output_text: str = ""
 
         self.logical_token_blocks: List[LogicalTokenBlock] = []
         # Initialize the logical token blocks with the prompt token ids.
         self._append_tokens_to_blocks(prompt_token_ids)
-        self.status = SequenceStatus.WAITING
+        self.status: SequenceStatus = SequenceStatus.WAITING
 
         # Used for incremental detokenization
         self.prefix_offset = 0
@@ -220,6 +220,8 @@ class Sequence:
                 f"status={self.status.name}, "
                 f"num_blocks={len(self.logical_token_blocks)})")
 
+    __str__ = __repr__
+
 
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
@@ -240,12 +242,27 @@ class SequenceGroup:
         arrival_time: float,
         prefix: Optional[Prefix] = None,
     ) -> None:
-        self.request_id = request_id
-        self.seqs_dict = {seq.seq_id: seq for seq in seqs}
-        self.sampling_params = sampling_params
-        self.arrival_time = arrival_time
+        self.request_id: str = request_id
+        self.seqs_dict: Dict[int, Sequence] = {seq.seq_id: seq for seq in seqs}
+        self.sampling_params: SamplingParams = sampling_params
+        self.arrival_time: float = arrival_time
         self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
+
+    def hacky_rewind(self) -> None:
+        # FIXME: Hack the sequence group to rewind every sequence back to a certain state.
+        """Rewind the sequence group to the state."""
+        for key, seq in self.seqs_dict.items():
+            assert isinstance(seq, Sequence)
+            new_seq = Sequence(
+                seq_id=seq.seq_id,
+                prompt=seq.prompt,
+                prompt_token_ids=seq.data.prompt_token_ids,
+                block_size=seq.block_size,
+            )
+            self.seqs_dict[key] = new_seq
+
+        return
 
     @property
     def prompt(self) -> str:
@@ -327,6 +344,8 @@ class SequenceGroup:
                 f"sampling_params={self.sampling_params}, "
                 f"num_seqs={len(self.seqs_dict)})")
 
+    __str__ = __repr__
+
 
 class SequenceGroupMetadata:
     """Metadata for a sequence group. Used to create `InputMetadata`.
@@ -350,12 +369,22 @@ class SequenceGroupMetadata:
         block_tables: Dict[int, List[int]],
         prefix: Optional[Prefix] = None,
     ) -> None:
-        self.request_id = request_id
-        self.is_prompt = is_prompt
-        self.seq_data = seq_data
+        self.request_id: str = request_id
+        self.is_prompt: bool = is_prompt
+        self.seq_data: Dict[int, SequenceData] = seq_data
         self.sampling_params = sampling_params
-        self.block_tables = block_tables
-        self.prefix = prefix
+        self.block_tables: Dict[int, List[int]] = block_tables
+        self.prefix: Optional[Prefix] = prefix
+
+    def __repr__(self):
+        return (f"SequenceGroupMetadata(request_id={self.request_id}, "
+                f"is_prompt={self.is_prompt}, "
+                f"seq_data={self.seq_data}, "
+                f"sampling_params={self.sampling_params}, "
+                f"block_tables={self.block_tables}, "
+                f"prefix={self.prefix})")
+
+    __str__ = __repr__
 
 
 class SequenceOutput:
@@ -400,8 +429,8 @@ class SequenceGroupOutput:
         samples: List[SequenceOutput],
         prompt_logprobs: Optional[PromptLogprobs],
     ) -> None:
-        self.samples = samples
-        self.prompt_logprobs = prompt_logprobs
+        self.samples: List[SequenceOutput] = samples
+        self.prompt_logprobs: Optional[PromptLogprobs] = prompt_logprobs
 
     def __repr__(self) -> str:
         return (f"SequenceGroupOutput(samples={self.samples}, "

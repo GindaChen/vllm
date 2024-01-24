@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import torch.distributed
 import torch.nn as nn
 
 from vllm.config import ModelConfig, ParallelConfig, SchedulerConfig
@@ -10,9 +11,11 @@ from vllm.logger import init_logger
 from vllm.model_executor import get_model, InputMetadata, SamplingMetadata
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
+from vllm.model_executor.parallel_utils.parallel_state import get_tensor_model_parallel_group, \
+    get_tensor_model_parallel_src_rank, get_tensor_model_parallel_rank
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
-from vllm.utils import in_wsl
+from vllm.utils import in_wsl, debug_pront, debug_slept
 
 logger = init_logger(__name__)
 
@@ -59,6 +62,13 @@ class ModelRunner:
         self.graph_block_tables = None  # Set after initial profiling.
         # cache in_wsl result
         self.in_wsl = in_wsl()
+
+    # @property
+    # def is_driver_worker(self):
+    #     # FIXME: (HACK) distinguish who is the driver worker.
+    #     rank = get_tensor_model_parallel_rank()
+    #     leader_rank = get_tensor_model_parallel_src_rank()
+    #     return rank == leader_rank
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
@@ -194,6 +204,8 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
+        debug_slept(0.5)
+        debug_pront(f"Inside _prepare_decode({seq_group_metadata_list=})")
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -201,27 +213,41 @@ class ModelRunner:
         context_lens: List[int] = []
         block_tables: List[List[int]] = []
 
+        debug_pront("Start iteration of the seq_group_metadata_list")
         for seq_group_metadata in seq_group_metadata_list:
+            debug_pront(f"Get {seq_group_metadata = }")
             assert not seq_group_metadata.is_prompt
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
+            debug_pront(f"Get {seq_ids = }")
             for seq_id in seq_ids:
+                debug_pront(f"Iterate on {seq_id = }")
                 seq_data = seq_group_metadata.seq_data[seq_id]
+                debug_pront(f"Get {seq_data = }")
                 generation_token = seq_data.get_last_token_id()
+                debug_pront(f"Get {generation_token = }")
                 input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
+                debug_pront(f"Get {seq_len = }")
+                debug_pront(f"Get {self.sliding_window = }")
                 position = seq_len - 1
                 input_positions.append([position])
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
+                debug_pront(f"Get {context_len = }")
                 context_lens.append(context_len)
+                debug_pront(f"Get {context_lens = }")
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                debug_pront(f"Get {block_table = }")
                 block_number = block_table[position // self.block_size]
+                debug_pront(f"Get {block_number = }")
                 block_offset = position % self.block_size
+                debug_pront(f"Get {block_offset = }")
                 slot = block_number * self.block_size + block_offset
+                debug_pront(f"Get {slot = }")
                 slot_mapping.append([slot])
 
                 if self.sliding_window is not None:
@@ -230,7 +256,12 @@ class ModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
+        debug_pront(f"Finished iteration of the seq_group_metadata_list")
         batch_size = len(input_tokens)
+
+        debug_pront(f"Get {batch_size = }")
+        debug_pront(f"Get {input_tokens = }")
+        debug_pront(f"Get {context_lens = }")
         max_context_len = max(context_lens)
         use_captured_graph = (
             not self.model_config.enforce_eager
@@ -375,6 +406,8 @@ class ModelRunner:
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
+        lead_worker_rank=0,
+        group=None,
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata, SamplingMetadata]:
         if self.is_driver_worker:
             # NOTE: We assume that all sequences in the group are all prompts or
@@ -385,6 +418,9 @@ class ModelRunner:
                 (input_tokens, input_positions, input_metadata, prompt_lens,
                  subquery_lens) = self._prepare_prompt(seq_group_metadata_list)
             else:
+                debug_pront(
+                    f"With {lead_worker_rank = }, Calling prepare_input_tensors({len(seq_group_metadata_list)=})"
+                )
                 (input_tokens, input_positions, input_metadata
                  ) = self._prepare_decode(seq_group_metadata_list)
                 subquery_lens = None
@@ -409,9 +445,12 @@ class ModelRunner:
                 "selected_token_indices":
                 sampling_metadata.selected_token_indices,
             }
-            broadcast_tensor_dict(metadata_dict, src=0)
+            broadcast_tensor_dict(metadata_dict,
+                                  src=lead_worker_rank,
+                                  group=group)
         else:
-            metadata_dict = broadcast_tensor_dict(src=0)
+            metadata_dict = broadcast_tensor_dict(src=lead_worker_rank,
+                                                  group=group)
             input_tokens = metadata_dict["input_tokens"]
             input_positions = metadata_dict["input_positions"]
             input_metadata = InputMetadata(
@@ -441,9 +480,19 @@ class ModelRunner:
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        lead_worker_rank=0,
+        group=None,
     ) -> Optional[SamplerOutput]:
+        rank = torch.distributed.get_rank()
+        debug_pront(
+            f"Worker with {rank = } Inside execute_model({len(seq_group_metadata_list)=}, {len(kv_caches)=}, {lead_worker_rank=}, {group=})"
+        )
         input_tokens, input_positions, input_metadata, sampling_metadata = (
-            self.prepare_input_tensors(seq_group_metadata_list))
+            self.prepare_input_tensors(
+                seq_group_metadata_list,
+                lead_worker_rank=lead_worker_rank,
+                group=group,
+            ))
         # Execute the model.
         if input_metadata.use_cuda_graph:
             graph_batch_size = input_tokens.shape[0]

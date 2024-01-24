@@ -5,12 +5,14 @@ from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
                     Union, AsyncIterator)
 
 from vllm.config import ModelConfig
+from vllm.core.dist_scheduler import DistScheduler, DistScheduleOutput
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.engine.ray_utils import initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
+from vllm.utils import debug_pront
 
 logger = init_logger(__name__)
 
@@ -105,7 +107,8 @@ class RequestTracker:
         """Process a request output from the engine."""
         request_id = request_output.request_id
 
-        self._request_streams[request_id].put(request_output)
+        stream = self._request_streams[request_id]
+        stream.put(request_output)
         if request_output.finished:
             if verbose:
                 logger.info(f"Finished request {request_id}.")
@@ -203,6 +206,141 @@ class _AsyncLLMEngine(LLMEngine):
 
         return self._process_model_outputs(output, scheduler_outputs)
 
+    async def _invoke_dist_workers(
+            self, dist_output: DistScheduleOutput,
+            is_prefill: bool) -> Tuple[List[RequestOutput], bool, bool]:
+
+        # See the DistScheduler.schedule() as of how the scheduling actually happened
+        # to avoid complex prefill / decode communication logic.
+        is_transfer = dist_output.is_transfer_schedule
+        if is_prefill:
+            seq_group_metadata_list = dist_output.prefill_metadata
+            scheduler_outputs = dist_output.prefill_output
+            worker_group = self.prefill_workers
+        else:
+            seq_group_metadata_list = dist_output.decode_metadata
+            scheduler_outputs = dist_output.decode_output
+            worker_group = self.decode_workers
+
+        # Invoke execute model
+        output = []
+        if not scheduler_outputs.is_empty(
+        ) or dist_output.is_transfer_schedule:
+            data = {
+                "seq_group_metadata_list": seq_group_metadata_list,
+                "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+                "send_blocks": dist_output.send_blocks,
+                "recv_blocks": dist_output.recv_blocks,
+            }
+            debug_pront(
+                f"{'Prefill pool' if is_prefill else 'Decode pool'} invoking execute_model with data: {data}"
+            )
+
+            all_outputs = await self._run_dist_worker_group_async(
+                worker_group,
+                "execute_model",
+                **data,
+            )
+            output = all_outputs[0]
+
+        step_output = self._process_model_outputs(output, scheduler_outputs)
+        return step_output, is_prefill, is_transfer
+
+    async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
+        # FIXME: Hack - decouple the concept of "running" vs "has output"
+
+        self.iteration_counter += 1
+        debug_pront("\n-------------------\n")
+        debug_pront(
+            f"Starting step_dist_async() step {self.iteration_counter}.")
+        assert self.parallel_config.is_disaggregate
+
+        scheduler: DistScheduler = self.scheduler
+        assert isinstance(scheduler, DistScheduler)
+
+        scheduler_outputs: DistScheduleOutput = scheduler.schedule()
+        debug_pront(f"Scheduler outputs properties: \n"
+                    f"{scheduler_outputs.is_transfer_schedule = },\n"
+                    f"{scheduler_outputs.has_prefill_schedule = },\n"
+                    f"{scheduler_outputs.has_decode_schedule = },\n")
+        debug_pront(f"Prefill scheduler: \n"
+                    f"{len(scheduler.prefill_scheduler.waiting) = } \n"
+                    f"{len(scheduler.prefill_scheduler.running) = } \n"
+                    f"{len(scheduler.prefill_scheduler.swapped) = } \n")
+        debug_pront(f"Decode scheduler: \n"
+                    f"{len(scheduler.decode_scheduler.waiting) = } \n"
+                    f"{len(scheduler.decode_scheduler.running) = } \n"
+                    f"{len(scheduler.decode_scheduler.swapped) = } \n")
+
+        prefill_future = None
+        decode_future = None
+
+        # Case 1: Block migration - must schedule both prefill and decode.
+        if scheduler_outputs.is_transfer_schedule:
+            assert scheduler.is_prefill_in_progress and scheduler.is_decode_in_progress, \
+                "Block migration must schedule both prefill and decode."
+            debug_pront(f"Block migration is invoked.")
+            prefill_future = self._invoke_dist_workers(scheduler_outputs,
+                                                       is_prefill=True)
+            decode_future = self._invoke_dist_workers(scheduler_outputs,
+                                                      is_prefill=False)
+            pass
+        # Case 2: Normal - can schedule either prefill or decode (or both)
+        elif scheduler_outputs.has_prefill_schedule or scheduler_outputs.has_decode_schedule:
+            if scheduler_outputs.has_prefill_schedule:
+                assert scheduler.is_prefill_in_progress, \
+                    "Prefill schedule must be invoked when prefill is in progress."
+                debug_pront(f"Prefill schedule is invoked.")
+                prefill_future = self._invoke_dist_workers(scheduler_outputs,
+                                                           is_prefill=True)
+            if scheduler_outputs.has_decode_schedule:
+                assert scheduler.is_decode_in_progress, \
+                    "Decode schedule must be invoked when decode is in progress."
+                debug_pront(f"Decode schedule is invoked.")
+                decode_future = self._invoke_dist_workers(scheduler_outputs,
+                                                          is_prefill=False)
+
+        # Add the futures to the pending futures set.
+        if prefill_future:
+            self.pending_futures.add(prefill_future)
+        if decode_future:
+            self.pending_futures.add(decode_future)
+
+        if not self.pending_futures:
+            return [], False
+
+        finished, pending = await asyncio.wait(
+            self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
+        self.pending_futures = pending
+
+        # Prepare return result.
+        result = []
+        for future in finished:
+            output, is_prefill, is_transfer = await future
+            debug_pront(
+                f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
+            if is_prefill:
+                scheduler.on_prefill_finish(is_transfer=is_transfer)
+            else:
+                scheduler.on_decode_finish(is_transfer=is_transfer)
+            result += output
+        debug_pront(
+            f"Finished step_dist_async() step {self.iteration_counter}.")
+        debug_pront(f"Obtain result: {result = }.")
+
+        debug_pront(
+            f"Scheduler properties: \n"
+            f"{scheduler.is_prefill_in_progress = }, \n"
+            f"{scheduler.is_decode_in_progress = }, \n"
+            f"{scheduler._in_progress_prefill_requests = }, \n"
+            f"{scheduler._in_progress_prefill_requests_metadatas = }, \n"
+            f"{scheduler.prefill_memblocks = }, \n"
+            f"{scheduler.pending_migration_requests = }, \n")
+
+        return result, True
+
     async def _run_workers_async(
         self,
         method: str,
@@ -227,6 +365,68 @@ class _AsyncLLMEngine(LLMEngine):
         # Run the ray workers asynchronously.
         for worker in self.workers:
             coros.append(worker.execute_method.remote(method, *args, **kwargs))
+
+        all_outputs = await asyncio.gather(*coros)
+        return all_outputs
+
+    async def _run_dist_worker_group_async(
+        self,
+        worker_group: 'List[Union[RayWorkerVllm, Worker]]',
+        method: str,
+        *args,
+        driver_args: Optional[List[Any]] = None,
+        driver_kwargs: Optional[Dict[str, Any]] = None,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ):
+        """Runs the given method on all workers in the given worker group."""
+        assert self.parallel_config.is_disaggregate
+
+        if driver_args is None:
+            driver_args = args
+        if driver_kwargs is None:
+            driver_kwargs = kwargs
+
+        def _is_local(worker) -> bool:
+            """Returns true if the worker is a local worker (wrt the driver)."""
+            return getattr(worker, 'is_driver_worker', False)
+
+        def _execute(worker, method, *args, **kwargs):
+            """Executes the given method on the worker. Returns a handler if
+            the worker is remote, otherwise returns the output directly.
+            """
+            if _is_local(worker):
+                method = getattr(worker, method)
+                func = partial(method, *args, **kwargs)
+                coro = asyncio.get_event_loop().run_in_executor(None, func)
+                return coro
+            return worker.execute_method.remote(method, *args, **kwargs)
+
+        def _get_return_value(worker, output):
+            """Auxiliary function to get the return value of the worker."""
+            if _is_local(worker):
+                return output
+            return ray.get(output)
+
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
+
+        lead_worker, rest_workers = worker_group[0], worker_group[1:]
+
+        # Start the lead worker
+        lead_worker_output = _execute(lead_worker, method, *driver_args,
+                                      **driver_kwargs)
+
+        # Start the rest of the workers
+        # TODO: Is the type actually right for ray outputs?
+        #  Don't we need to use ray.get()?
+        rest_worker_outputs = [
+            _execute(worker, method, *args, **kwargs)
+            for worker in rest_workers
+        ]
+
+        coros = [lead_worker_output] + rest_worker_outputs
 
         all_outputs = await asyncio.gather(*coros)
         return all_outputs
@@ -278,7 +478,7 @@ class AsyncLLMEngine:
         # task as well to prevent it from being garbage
         # collected
         self._background_loop_unshielded = None
-        self.start_engine_loop = start_engine_loop
+        self.start_engine_loop: bool = start_engine_loop
         self._request_tracker = RequestTracker()
 
     @property
@@ -339,15 +539,21 @@ class AsyncLLMEngine:
 
         if self.engine_use_ray:
             request_outputs = await self.engine.step.remote()
+            is_running = len(request_outputs) > 0
         else:
-            request_outputs = await self.engine.step_async()
+            if self.engine.parallel_config.is_disaggregate:
+                request_outputs, is_running = await self.engine.step_dist_async(
+                )
+            else:
+                request_outputs = await self.engine.step_async()
+                is_running = len(request_outputs) > 0
 
         # Put the outputs into the corresponding streams.
         for request_output in request_outputs:
             self._request_tracker.process_request_output(
                 request_output, verbose=self.log_requests)
 
-        return len(request_outputs) > 0
+        return is_running
 
     async def _engine_abort(self, request_ids: Iterable[str]):
         if self.engine_use_ray:
@@ -360,6 +566,8 @@ class AsyncLLMEngine:
         has_requests_in_progress = False
         while True:
             if not has_requests_in_progress:
+                # Wait for new requests if there are no requests in progress.
+                debug_pront("Waiting for new requests...")
                 await self._request_tracker.wait_for_new_requests()
             has_requests_in_progress = await self.engine_step()
             await asyncio.sleep(0)

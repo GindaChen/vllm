@@ -1,12 +1,15 @@
+import asyncio
 import copy
+import traceback
 from collections import defaultdict
 import os
 import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
-                    Union)
+                    Union, Coroutine, Set)
 
 from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
+from vllm.core.dist_scheduler import DistScheduler
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.metrics import record_metrics
@@ -110,11 +113,24 @@ class LLMEngine:
         else:
             self._init_workers()
 
+        # FIXME: Brutally separated prefill and decode worker.
+        if self.parallel_config.is_disaggregate:
+            N = self.parallel_config.tensor_parallel_size
+            N = N - 1  # Excluding the driver worker, assuming driver worker works on prefill.
+            workers = self.workers
+            prefill_workers, decode_workers = workers[:N], workers[N:]
+            prefill_workers = [self.driver_worker] + prefill_workers
+            self.prefill_workers, self.decode_workers = prefill_workers, decode_workers
+            pass
+
         # Profile the memory usage and initialize the cache.
         self._init_cache()
 
         # Create the scheduler.
-        self.scheduler = Scheduler(scheduler_config, cache_config)
+        if self.parallel_config.is_disaggregate:
+            self.scheduler = DistScheduler(scheduler_config, cache_config)
+        else:
+            self.scheduler = Scheduler(scheduler_config, cache_config)
 
         # Logging.
         self.last_logging_time = 0.0
@@ -122,6 +138,11 @@ class LLMEngine:
         self.num_prompt_tokens: List[Tuple[float, int]] = []
         # List of (timestamp, num_tokens)
         self.num_generation_tokens: List[Tuple[float, int]] = []
+
+        # Use for async to record the active working set
+        # TODO: Rename to active_working_set? active_working_coros?
+        self.pending_futures: Set[Coroutine] = set()
+        self.iteration_counter = 0
 
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
@@ -220,6 +241,7 @@ class LLMEngine:
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)
 
+        logger.info(f"Initializing {len(self.workers)} workers in Ray.")
         for rank, (worker, (node_id,
                             _)) in enumerate(zip(self.workers,
                                                  worker_node_and_gpu_ids),
@@ -237,6 +259,8 @@ class LLMEngine:
 
         driver_rank = 0
         driver_local_rank = node_workers[driver_node_id].index(driver_rank)
+
+        logger.info(f"Initializing driver worker in Ray.")
         self.driver_worker = Worker(
             model_config,
             parallel_config,
@@ -247,12 +271,18 @@ class LLMEngine:
             is_driver_worker=True,
         )
 
+        logger.info(f"Running init_model.")
         self._run_workers("init_model")
+
+        logger.info(f"Running load_model.")
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
             max_parallel_loading_workers,
         )
+
+        logger.info(f"Finished Ray worker initialization.")
+        return
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -686,6 +716,81 @@ class LLMEngine:
                                    scheduler_outputs.num_batched_tokens)
         return request_outputs
 
+    def run_engine_disaggregate(self):
+        # This is assuming using the old scheduler not the new DistScheduler.
+        assert isinstance(self.scheduler, Scheduler)
+        results = []
+
+        # Run one prefill.
+        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        data = {
+            "seq_group_metadata_list": seq_group_metadata_list,
+            "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+            "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+            "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+        }
+        worker_group = self.prefill_workers
+        all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                             **data)
+        output = all_outputs[0]
+        step_output = self._process_model_outputs(output, scheduler_outputs)
+
+        # Transfer KV Cache.
+        _blocks_to_transfer: 'List[Dict[int, List[int]]]' = [
+            i.block_tables for i in seq_group_metadata_list
+        ]
+        blocks_to_transfer = {
+            v
+            for table in _blocks_to_transfer for k, vs in table.items()
+            for v in vs
+        }
+        blocks_to_transfer = list(blocks_to_transfer)
+        self.transfer_kv_cache(blocks_to_transfer)
+
+        # Run one decode.
+        worker_group = self.decode_workers
+
+        # Make the leader worker the driver worker.
+        def set_leader_worker(worker):
+            # worker.is_driver_worker = True
+            worker.model_runner.is_driver_worker = True
+            return
+
+        self._run_worker_group([worker_group[0]], "execute_lambda",
+                               set_leader_worker)
+        while self.scheduler.has_unfinished_seqs():
+            seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule(
+            )
+            data = {
+                "seq_group_metadata_list": seq_group_metadata_list,
+                "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+            }
+            all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                                 **data)
+            output = all_outputs[0]
+            step_output = self._process_model_outputs(output,
+                                                      scheduler_outputs)
+            for item in step_output:
+                if item.finished:
+                    results.append(item)
+
+        results = sorted(results, key=lambda x: int(x.request_id))
+        return results
+
+    def transfer_kv_cache(self, blocks_to_transfer: List[int]):
+        # Invoke the transfer for each pipeline parallelism group.
+        # FIXME: The send_blocks and recv_blocks should be different,
+        #  and to-be allocated by the scheduler's block manager.
+        #  For simplicity, we ignore this part so far.
+        self._run_workers(
+            "transfer_kv_cache",
+            send_blocks=blocks_to_transfer,
+            recv_blocks=blocks_to_transfer,
+        )
+        return
+
     def step(self) -> List[RequestOutput]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -738,17 +843,23 @@ class LLMEngine:
             >>>         break
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        data = {
+            "seq_group_metadata_list": seq_group_metadata_list,
+            "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+            "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+            "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+        }
+        if self.parallel_config.is_disaggregate:
+            worker_group = self.prefill_workers
+        else:
+            worker_group = [self.driver_worker] + self.workers
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
-            all_outputs = self._run_workers(
-                "execute_model",
-                driver_kwargs={
-                    "seq_group_metadata_list": seq_group_metadata_list,
-                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
-                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
-                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
-                })
+            # TODO: (Question) why do we couple the data sending and model execution?
+            #   For simplicity, can we just send the data to the workers then call "execute_model"?
+            all_outputs = self._run_worker_group(worker_group, "execute_model",
+                                                 **data)
 
             # Only the driver worker returns the sampling results.
             output = all_outputs[0]
@@ -919,3 +1030,79 @@ class LLMEngine:
             ray_worker_outputs = ray.get(ray_worker_outputs)
 
         return [driver_worker_output] + ray_worker_outputs
+
+    def _run_worker_group(
+        self,
+        worker_group: 'List[Union[RayWorkerVllm, Worker]]',
+        method: str,
+        *args,
+        driver_args: Optional[List[Any]] = None,
+        driver_kwargs: Optional[Dict[str, Any]] = None,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ):
+        """Similar to _run_workers(), except if all workers are remote worker,
+        then the first worker will be selected as if it is the driver worker.
+        No locality assumption is made.
+        """
+
+        driver_args = driver_args if driver_args is not None else args
+        driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
+
+        def _is_local(worker) -> bool:
+            """Returns true if the worker is a local worker (wrt the driver)."""
+            return getattr(worker, 'is_driver_worker', False)
+
+        def _execute(worker, method, *args, **kwargs):
+            """Executes the given method on the worker. Returns a handler if
+            the worker is remote, otherwise returns the output directly.
+            """
+            if _is_local(worker):
+                return getattr(worker, method)(*args, **kwargs)
+            return worker.execute_method.remote(method, *args, **kwargs)
+
+        def _get_return_value(worker, output):
+            """Auxiliary function to get the return value of the worker."""
+            if _is_local(worker):
+                return output
+            return ray.get(output)
+
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
+
+        lead_worker, rest_workers = worker_group[0], worker_group[1:]
+
+        # Start the rest of the workers first.
+        rest_worker_outputs = [
+            _execute(worker, method, *args, **kwargs)
+            for worker in rest_workers
+        ]
+
+        # Start the lead worker after all the ray workers.
+        lead_worker_output = _execute(lead_worker, method, *driver_args,
+                                      **driver_kwargs)
+
+        # Return the results.
+        outputs = [lead_worker_output] + rest_worker_outputs
+        # result = [_get_return_value(worker, output) for worker, output in zip(worker_group, outputs)]
+        # return result
+
+        result = []
+        # FIXME: (HACK) Print detailed exception if happens (for debugging)
+        has_error = False
+        for worker_id, (worker,
+                        output) in enumerate(zip(worker_group, outputs)):
+            try:
+                r = _get_return_value(worker, output)
+                result.append(r)
+            except Exception as e:
+                logger.error(f"Ray worker {worker_id} failed with error: {e}")
+                traceback.print_exc()
+                has_error = True
+                pass
+            pass
+        if has_error:
+            raise Exception(
+                f"At execution of {method}, at least one worker failed.")
+        return result

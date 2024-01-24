@@ -81,6 +81,10 @@ class LLM:
         swap_space: int = 4,
         enforce_eager: bool = False,
         max_context_len_to_capture: int = 8192,
+        is_disaggregate: bool = False,
+        pipeline_parallel_size: int = 1,
+        is_dummy_llm:
+        bool = False,  # FIXME: (Hack) do not let llm engine initialized
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -100,10 +104,15 @@ class LLM:
             swap_space=swap_space,
             enforce_eager=enforce_eager,
             max_context_len_to_capture=max_context_len_to_capture,
+            is_disaggregate=is_disaggregate,
+            pipeline_parallel_size=pipeline_parallel_size,
             **kwargs,
         )
-        self.llm_engine = LLMEngine.from_engine_args(engine_args)
+        self.engine_args = engine_args
         self.request_counter = Counter()
+        if is_dummy_llm:
+            return
+        self.llm_engine = LLMEngine.from_engine_args(engine_args)
 
     def get_tokenizer(
             self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
@@ -169,7 +178,10 @@ class LLM:
             token_ids = None if prompt_token_ids is None else prompt_token_ids[
                 i]
             self._add_request(prompt, sampling_params, token_ids, prefix_pos_i)
-        return self._run_engine(use_tqdm)
+        if self.llm_engine.parallel_config.is_disaggregate:
+            return self._run_engine_disaggregate(use_tqdm)
+        else:
+            return self._run_engine(use_tqdm)
 
     def _add_request(
         self,
@@ -206,3 +218,6 @@ class LLM:
         # its previous requests.
         outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
+
+    def _run_engine_disaggregate(self, use_tqdm: bool) -> List[RequestOutput]:
+        return self.llm_engine.run_engine_disaggregate()

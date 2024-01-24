@@ -1,3 +1,4 @@
+import contextlib
 from collections import namedtuple
 from typing import Any, Dict, List, Optional, Union
 
@@ -12,6 +13,18 @@ from vllm.model_executor.parallel_utils.parallel_state import (
 )
 
 
+@contextlib.contextmanager
+def log_calling_method(method_name):
+    """Log the calling method."""
+    yield
+    return
+
+    print(f"Calling {method_name} ...")
+    yield
+    print(f"Finished {method_name} ...")
+
+
+@log_calling_method("tensor_model_parallel_all_reduce")
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group.
 
@@ -26,6 +39,7 @@ def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     return input_
 
 
+@log_calling_method("tensor_model_parallel_all_gather")
 def tensor_model_parallel_all_gather(input_: torch.Tensor,
                                      dim: int = -1) -> torch.Tensor:
     """All-gather the input tensor across model parallel group."""
@@ -54,14 +68,19 @@ def tensor_model_parallel_all_gather(input_: torch.Tensor,
     return output_tensor
 
 
-def tensor_model_parallel_gather(input_: torch.Tensor,
-                                 dst: int = 0,
-                                 dim: int = -1) -> torch.Tensor:
+@log_calling_method("tensor_model_parallel_gather")
+def tensor_model_parallel_gather(
+        input_: torch.Tensor,
+        dst: int = 0,  # local rank
+        dim: int = -1) -> torch.Tensor:
     """Gather the input tensor across model parallel group.
 
     NOTE: We assume that the input tensor is on the same device across
     all the ranks.
     """
+    group = get_tensor_model_parallel_group()
+    ranks = torch.distributed.get_process_group_ranks(group)
+    dst_global_rank = ranks[dst]
     world_size = get_tensor_model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
@@ -72,22 +91,25 @@ def tensor_model_parallel_gather(input_: torch.Tensor,
         # Convert negative dim to positive.
         dim += input_.dim()
     # Allocate output tensor.
-    if get_tensor_model_parallel_rank() == dst:
+    # rank = torch.distributed.get_rank()
+    rank = get_tensor_model_parallel_rank()
+    if rank == dst:
         gather_list = [torch.empty_like(input_) for _ in range(world_size)]
     else:
         gather_list = None
     # Gather.
     torch.distributed.gather(input_,
                              gather_list,
-                             dst=dst,
-                             group=get_tensor_model_parallel_group())
-    if get_tensor_model_parallel_rank() == dst:
+                             dst=dst_global_rank,
+                             group=group)
+    if rank == dst:
         output_tensor = torch.cat(gather_list, dim=dim)
     else:
         output_tensor = None
     return output_tensor
 
 
+@log_calling_method("tensor_model_parallel_scatter")
 def broadcast(input_: torch.Tensor,
               src: int = 0,
               group: Optional[ProcessGroup] = None):
@@ -105,6 +127,7 @@ def broadcast(input_: torch.Tensor,
     return input_
 
 
+@log_calling_method("tensor_model_parallel_broadcast")
 def broadcast_object_list(obj_list: List[Any],
                           src: int = 0,
                           group: Optional[ProcessGroup] = None):
@@ -125,6 +148,7 @@ def broadcast_object_list(obj_list: List[Any],
 TensorMetadata = namedtuple("TensorMetadata", ["dtype", "size"])
 
 
+@log_calling_method("broadcast_tensor_dict")
 def broadcast_tensor_dict(
     tensor_dict: Optional[Dict[Any, Union[torch.Tensor, Any]]] = None,
     src: int = 0,
@@ -161,7 +185,7 @@ def broadcast_tensor_dict(
         for key, value in metadata_list:
             if isinstance(value, TensorMetadata):
                 tensor = tensor_dict[key]
-                torch.distributed.broadcast(tensor, src=src)
+                torch.distributed.broadcast(tensor, src=src, group=group)
     else:
         recv_metadata_list = [None]
         torch.distributed.broadcast_object_list(recv_metadata_list,

@@ -49,6 +49,18 @@ class SchedulerOutputs:
         assert not (blocks_to_swap_in and blocks_to_swap_out)
         self.ignored_seq_groups = ignored_seq_groups
 
+    def __repr__(self):
+        return (
+            f"SchedulerOutputs(scheduled_seq_groups={self.scheduled_seq_groups}, "
+            f"prompt_run={self.prompt_run}, "
+            f"num_batched_tokens={self.num_batched_tokens}, "
+            f"blocks_to_swap_in={self.blocks_to_swap_in}, "
+            f"blocks_to_swap_out={self.blocks_to_swap_out}, "
+            f"blocks_to_copy={self.blocks_to_copy}, "
+            f"ignored_seq_groups={self.ignored_seq_groups})")
+
+    __str__ = __repr__
+
     def is_empty(self) -> bool:
         # NOTE: We do not consider the ignored sequence groups.
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in
@@ -161,8 +173,8 @@ class Scheduler:
                 waiting_seqs = seq_group.get_seqs(
                     status=SequenceStatus.WAITING)
                 assert len(waiting_seqs) == 1, (
-                    "Waiting sequence group should have only one prompt "
-                    "sequence.")
+                    f"Waiting sequence group should have only one prompt "
+                    f"sequence. Got { len(waiting_seqs) } sequences.")
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 if num_prompt_tokens > self.prompt_limit:
                     logger.warning(
@@ -298,7 +310,8 @@ class Scheduler:
         )
         return scheduler_outputs
 
-    def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
+    def schedule(
+        self, ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.

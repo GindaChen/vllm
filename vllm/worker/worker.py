@@ -1,5 +1,6 @@
 """A GPU worker class."""
 import os
+from time import sleep
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -11,8 +12,11 @@ from vllm.model_executor import set_random_seed
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.parallel_state import (
-    ensure_model_parallel_initialized)
+    initialize_model_parallel, get_tensor_model_parallel_src_rank,
+    get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
+    get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
+from vllm.utils import debug_slept, debug_pront
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
 
@@ -45,12 +49,14 @@ class Worker:
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
-        self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config, is_driver_worker)
+        # Uninitialized model runner. Will be initialized by self.init_model().
+        self.is_lead_worker: bool = None  # lead worker of the TP-group
+        self.model_runner: ModelRunner = None  # ModelRunner
+
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
-        self.cache_engine = None
+        self.cache_engine: 'CacheEngine' = None
         self.cache_events = None
         self.gpu_cache = None
 
@@ -75,10 +81,16 @@ class Worker:
                                       self.distributed_init_method)
 
         # Initialize the model.
+        is_lead_worker = (self.rank == get_tensor_model_parallel_src_rank())
+        self.is_lead_worker = is_lead_worker
+        self.model_runner = ModelRunner(self.model_config,
+                                        self.parallel_config,
+                                        self.scheduler_config, is_lead_worker)
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
         self.model_runner.load_model()
+        # FIXME: Hack - if I'm the leader of the TP-group, set the model_runner's driver flag to true.
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -128,6 +140,9 @@ class Worker:
         self.gpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
+    def execute_lambda(self, lambda_fn, *args, **kwargs):
+        return lambda_fn(self, *args, **kwargs)
+
     def warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
             self.model_runner.capture_model(self.gpu_cache)
@@ -161,6 +176,36 @@ class Worker:
             for event in cache_events:
                 event.wait()
 
+    # FIXME: (hack) Hack the way out to identify prefill/decode role of the worker.
+    def transfer_kv_cache(self,
+                          send_blocks: List[int] = None,
+                          recv_blocks: List[int] = None):
+        """Migrate KV cache from prefill to decode. If the worker is
+        responsible for prefill, then send; otherwise, receive.
+        """
+
+        if not send_blocks or not recv_blocks:
+            return
+
+        debug_pront(
+            f"Worker {self.rank} executes transfer_kv_cache with {send_blocks = } and {recv_blocks = }"
+        )
+
+        def is_prefill_worker():
+            leader_rank = get_pipeline_model_parallel_first_rank()
+            rank = torch.distributed.get_rank()
+            return leader_rank == rank
+
+        if is_prefill_worker():
+            self.cache_engine.send_blocks(send_blocks)
+        else:
+            self.cache_engine.recv_blocks(recv_blocks)
+
+        torch.cuda.synchronize()
+        return
+
+    # FIXME: (hack) SHOULD NOT BE IN MASTER!
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -168,35 +213,48 @@ class Worker:
         blocks_to_swap_in: Optional[Dict[int, int]] = None,
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
+        # TODO: Decouple data transfer from the send/recv logic.
+        send_blocks: List[int] = None,
+        recv_blocks: List[int] = None,
     ) -> Optional[SamplerOutput]:
-        if self.is_driver_worker:
-            assert seq_group_metadata_list is not None
-            num_seq_groups = len(seq_group_metadata_list)
-            assert blocks_to_swap_in is not None
-            assert blocks_to_swap_out is not None
-            assert blocks_to_copy is not None
-            data = {
-                "num_seq_groups": num_seq_groups,
-                "blocks_to_swap_in": blocks_to_swap_in,
-                "blocks_to_swap_out": blocks_to_swap_out,
-                "blocks_to_copy": blocks_to_copy,
-            }
-            broadcast_tensor_dict(data, src=0)
-        else:
-            data = broadcast_tensor_dict(src=0)
-            num_seq_groups = data["num_seq_groups"]
-            blocks_to_swap_in = data["blocks_to_swap_in"]
-            blocks_to_swap_out = data["blocks_to_swap_out"]
-            blocks_to_copy = data["blocks_to_copy"]
+        # FIXME: (hack) pre-execution metadata from driver node to this worker.
 
+        # Transfer blocks from prefill worker to this worker (if any)
+        self.transfer_kv_cache(send_blocks=send_blocks,
+                               recv_blocks=recv_blocks)
+
+        # Perform cache swapping
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.
+        num_seq_groups = len(seq_group_metadata_list)
+        debug_pront(
+            f"Worker {self.rank} executes model with {seq_group_metadata_list = }"
+        )
+        debug_pront(
+            f"Worker {self.rank} executes model with {num_seq_groups = }")
         if num_seq_groups == 0:
             return {}
 
-        output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache)
+        # Execute the model in the same tensor-parallel group.
+        lead_worker_rank = get_tensor_model_parallel_src_rank()
+        group = get_tensor_model_parallel_group()
+        debug_pront(
+            f"Worker {self.rank} executes model with {lead_worker_rank = } "
+            f"and {torch.distributed.get_process_group_ranks(group) = }")
+        debug_pront(f"Worker {self.rank} property: \n"
+                    f"{torch.distributed.get_rank() = }\n"
+                    f"{self.rank = }\n"
+                    f"{self.is_driver_worker = }\n"
+                    f"{self.model_runner.is_driver_worker = }\n")
+        debug_slept(1)
+
+        output = self.model_runner.execute_model(
+            seq_group_metadata_list,
+            self.gpu_cache,
+            lead_worker_rank=lead_worker_rank,
+            group=group,
+        )
         return output
 
 
