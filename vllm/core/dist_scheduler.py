@@ -5,13 +5,16 @@ from vllm.config import SchedulerConfig, CacheConfig
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.sequence import SequenceGroup, Sequence, SequenceGroupMetadata, SequenceStatus
 
+get_empty_output = lambda: SchedulerOutputs([], None, 0, {}, {}, {}, [])
+
 
 @dataclasses.dataclass
 class DistScheduleOutput:
+
     prefill_schedule: Tuple[List[SequenceGroupMetadata],
-                            SchedulerOutputs] = ([], None)
+                            SchedulerOutputs] = ([], get_empty_output())
     decode_schedule: Tuple[List[SequenceGroupMetadata],
-                           SchedulerOutputs] = ([], None)
+                           SchedulerOutputs] = ([], get_empty_output())
     # FIXME: Is the type actually correct? also need to
     #  assume send / recv blocks are one-to-one mapping
     send_blocks: List[int] = None
