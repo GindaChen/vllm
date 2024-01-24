@@ -168,7 +168,8 @@ class DistScheduler:
         # remove the sequence from the prefill scheduler.
         if is_transfer:
             # Remove the requests from prefill.
-            self.prefill_scheduler.abort_seq_group(self.pending_migration_requests)
+            self.prefill_scheduler.abort_seq_group(
+                self.pending_migration_requests)
             self.pending_migration_requests = None
             return
 
