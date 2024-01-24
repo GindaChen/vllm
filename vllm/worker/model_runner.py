@@ -236,10 +236,10 @@ class ModelRunner:
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
-                time.sleep(5)
-                print(f"Get {min(seq_len, self.sliding_window) = }")
                 print(f"Get {context_len = }")
                 context_lens.append(context_len)
+                print(f"Get {context_lens = }")
+                time.sleep(5)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
                 print(f"Get {block_table = }")
