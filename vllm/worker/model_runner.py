@@ -259,6 +259,7 @@ class ModelRunner:
 
         print(f"Finished iteration of the seq_group_metadata_list")
         batch_size = len(input_tokens)
+
         print(f"Get {batch_size = }")
         print(f"Get {input_tokens = }")
         print(f"Get {context_lens = }")
