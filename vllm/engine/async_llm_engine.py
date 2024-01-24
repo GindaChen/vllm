@@ -232,6 +232,7 @@ class _AsyncLLMEngine(LLMEngine):
                 "send_blocks": dist_output.send_blocks,
                 "recv_blocks": dist_output.recv_blocks,
             }
+            logger.info(f"{'Prefill pool' if is_prefill else 'Decode pool' } invoking execute_model with {data = }.")
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,
                 "execute_model",
@@ -253,11 +254,22 @@ class _AsyncLLMEngine(LLMEngine):
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        logger.info(f"Create one scheduler outputs: {scheduler_outputs}.")
-        logger.info(f"Scheduler outputs properties: "
-                    f"{scheduler_outputs.is_transfer_schedule = }, "
-                    f"{len(scheduler_outputs.prefill_metadata) = },"
-                    f"{len(scheduler_outputs.decode_metadata) = }.")
+        logger.info(f"Scheduler outputs properties: \n"
+                    f"{scheduler_outputs.is_transfer_schedule = },\n"
+                    f"{scheduler_outputs.has_prefill_schedule = },\n"
+                    f"{scheduler_outputs.has_decode_schedule = },\n"
+                    )
+        logger.info(f"Prefill scheduler: \n"
+                    f"{len(scheduler.prefill_scheduler.waiting) } \n"
+                    f"{len(scheduler.prefill_scheduler.running) } \n"
+                    f"{len(scheduler.prefill_scheduler.swapped) } \n"
+                    )
+        logger.info(f"Decode scheduler: \n"
+                    f"{len(scheduler.decode_scheduler.waiting) } \n"
+                    f"{len(scheduler.decode_scheduler.running) } \n"
+                    f"{len(scheduler.decode_scheduler.swapped) } \n"
+                    )
+
         prefill_future = None
         decode_future = None
 

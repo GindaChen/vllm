@@ -136,9 +136,10 @@ class CacheEngine:
         self._swap(self.gpu_cache, self.cpu_cache, src_to_dst)
 
     def send_blocks(self, block_ids: List[int]) -> None:
-        logger.debug(f"Sending blocks: {block_ids}")
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
+        print(f"Sending blocks {block_ids = } to {rank = }")
+        logger.debug(f"Sending blocks {block_ids = } to {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
                 logger.debug(f"Sending block: {block_id} from layer {i}")
@@ -150,23 +151,30 @@ class CacheEngine:
         for task in tasks:
             logger.debug(f"Waiting for task: {task}")
             task.wait()
+        print(f"Done sending blocks {block_ids = } to {rank = }")
+        logger.debug(f"Done sending blocks {block_ids = } to {rank = }")
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
-        logger.debug(f"Receiving blocks: {block_ids}")
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
+        print(f"Receiving blocks {block_ids = } from {rank = }")
+        logger.debug(f"Receiving blocks {block_ids = } from {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
+                print(f"Receiving block: {block_id} from layer {i}")
                 logger.debug(f"Receiving block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.irecv(a, src=rank)
                     tasks.append(x)
                 pass
-        for task in tasks:
-            logger.debug(f"Waiting for task: {task}")
+        for i, task in enumerate(tasks):
+            print(f"Waiting for task: {i}")
+            logger.debug(f"Waiting for task: {i}")
             task.wait()
+        print(f"Done receiving blocks {block_ids = } from {rank = }")
+        logger.debug(f"Done receiving blocks {block_ids = } from {rank = }")
         return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:

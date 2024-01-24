@@ -179,6 +179,8 @@ class Worker:
         if not send_blocks or not recv_blocks:
             return
 
+        print(f"Worker {self.rank} executes transfer_kv_cache with {send_blocks = } and {recv_blocks = }")
+
         def is_prefill_worker():
             leader_rank = get_pipeline_model_parallel_first_rank()
             rank = torch.distributed.get_rank()
