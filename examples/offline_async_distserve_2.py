@@ -38,27 +38,16 @@ async def main():
     # and print the results: print(f"[User] At user level, received output for request: {request_output = }")
     final_output = []
     while result_generators:
-        # Run all generators concurrently and wait for the first one to complete
-        done, pending = await asyncio.wait([
-            asyncio.create_task(gen.__anext__()) for gen in result_generators
-        ],
-                                           return_when=asyncio.FIRST_COMPLETED)
-
-        for task in done:
+        for gen in result_generators:
             try:
-                result = task.result()
-                assert isinstance(result, RequestOutput)
-                # Process the result here
+                result: RequestOutput = await gen.__anext__()
                 output_text = " ".join([i.text for i in result.outputs])
                 text = f"[{result.request_id} ({len(result.outputs)})] {result.prompt} {output_text}"
                 print(text)
             except StopAsyncIteration:
-                # This generator is exhausted, remove it
-                result_generators.remove(task.get_coro().cr_await)
-
-        # Cancel any pending tasks (those that didn't finish first)
-        for task in pending:
-            task.cancel()
+                result_generators.remove(gen)
+            pass
+        pass
 
     return final_output
 
