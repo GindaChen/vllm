@@ -84,16 +84,16 @@ def initialize_cluster(
                 address=ray_address,
                 ignore_reinit_error=True,
                 num_gpus=parallel_config.world_size,
-                local_mode=
-                True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
+                # local_mode=
+                # True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
             )
             logger.debug(f"Ray init with debugging enabled: {ray_address}")
         else:
             ray.init(
                 address=ray_address,
                 ignore_reinit_error=True,
-                local_mode=
-                True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
+                # local_mode=
+                # True,  # FIXME: (hack) SHOULD NOT BE IN MASTER! - enable debug
             )
             logger.debug(f"Ray init with debugging enabled: {ray_address}")
 
