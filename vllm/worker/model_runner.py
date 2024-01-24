@@ -236,7 +236,7 @@ class ModelRunner:
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
-                time.sleep(2)
+                time.sleep(5)
                 print(f"Get {min(seq_len, self.sliding_window) = }")
                 print(f"Get {context_len = }")
                 context_lens.append(context_len)
