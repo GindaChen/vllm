@@ -204,6 +204,7 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
+        time.sleep(2)
         print(f"Inside _prepare_decode({seq_group_metadata_list=})")
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
@@ -234,6 +235,7 @@ class ModelRunner:
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
+                time.sleep(2)
                 print(f"Get {min(seq_len, self.sliding_window) = }")
                 print(f"Get {context_len = }")
                 context_lens.append(context_len)
