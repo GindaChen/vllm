@@ -32,7 +32,7 @@ async def main():
     final_output = []
     async for request_output in results_generator:
         final_output.append(request_output)
-        print(request_output)
+        print(f"[User] At user level, received output for request: {request_output = }")
 
     return final_output
 
