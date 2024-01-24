@@ -47,10 +47,10 @@ class Worker:
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
-        # FIXME: Assume the first worker in TP-group is the lead worker.
-        self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config,
-                                        self.is_driver_worker)
+        # Uninitialized model runner. Will be initialized by self.init_model().
+        self.is_lead_worker: bool = None  # lead worker of the TP-group
+        self.model_runner: ModelRunner = None  # ModelRunner
+
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
@@ -79,10 +79,16 @@ class Worker:
                                       self.distributed_init_method)
 
         # Initialize the model.
+        is_lead_worker = (self.rank == get_tensor_model_parallel_src_rank())
+        self.is_lead_worker = is_lead_worker
+        self.model_runner = ModelRunner(self.model_config,
+                                        self.parallel_config,
+                                        self.scheduler_config, is_lead_worker)
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
         self.model_runner.load_model()
+        # FIXME: Hack - if I'm the leader of the TP-group, set the model_runner's driver flag to true.
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -228,6 +234,11 @@ class Worker:
         group = get_tensor_model_parallel_group()
         print(f"Worker {self.rank} executes model with {lead_worker_rank = } "
               f"and {torch.distributed.get_process_group_ranks(group) = }")
+        print(f"Worker {self.rank} property: \n"
+              f"{torch.distributed.get_rank() = }\n"
+              f"{self.rank = }\n"
+              f"{self.is_driver_worker = }\n"
+              f"{self.model_runner.is_driver_worker = }\n")
 
         output = self.model_runner.execute_model(
             seq_group_metadata_list,

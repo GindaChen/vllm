@@ -387,7 +387,6 @@ class ModelRunner:
         lead_worker_rank=0,
         group=None,
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata, SamplingMetadata]:
-        # FIXME: (GindaChen) Does the function assume it calls on a TP-group?
         if self.is_driver_worker:
             # NOTE: We assume that all sequences in the group are all prompts or
             # all decodes.
