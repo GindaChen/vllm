@@ -251,9 +251,6 @@ class _AsyncLLMEngine(LLMEngine):
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
         # FIXME: Hack - decouple the concept of "running" vs "has output"
 
-        # Sleep 1 second
-        await asyncio.sleep(1)
-
         self.iteration_counter += 1
         logger.info("\n-------------------\n")
         logger.info(

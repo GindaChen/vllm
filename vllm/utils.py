@@ -1,6 +1,7 @@
 import enum
 import os
 import socket
+import time
 import uuid
 from platform import uname
 from typing import List
@@ -77,3 +78,9 @@ def get_open_port() -> int:
 
 def set_cuda_visible_devices(device_ids: List[int]) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
+
+
+# debug_pront = print
+debug_pront = lambda *_, **__: None
+# debug_slept = time.sleep
+debug_slept = lambda *_, **__: None

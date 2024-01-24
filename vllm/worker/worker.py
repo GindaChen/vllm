@@ -16,6 +16,7 @@ from vllm.model_executor.parallel_utils.parallel_state import (
     get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
     get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
+from vllm.utils import debug_slept
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
 
@@ -244,7 +245,7 @@ class Worker:
               f"{self.rank = }\n"
               f"{self.is_driver_worker = }\n"
               f"{self.model_runner.is_driver_worker = }\n")
-        sleep(1)
+        debug_slept(1)
 
         output = self.model_runner.execute_model(
             seq_group_metadata_list,
