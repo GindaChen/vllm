@@ -1,4 +1,5 @@
 import dataclasses
+from copy import deepcopy
 from typing import Union, Iterable, List, Tuple, Dict
 
 from vllm.config import SchedulerConfig, CacheConfig
@@ -173,9 +174,9 @@ class DistScheduler:
         # Forward the requests to the decode scheduler.
         for seq_group in self._in_progress_prefill_requests:
             assert isinstance(seq_group, SequenceGroup)
-            # Rewind the state of the sequences within the sequence group
-            seq_group.hacky_rewind()
-            self.decode_scheduler.add_seq_group(seq_group)
+            new_seq_group = deepcopy(seq_group)
+            new_seq_group.hacky_rewind()
+            self.decode_scheduler.add_seq_group(new_seq_group)
             # TODO: Suppress the seq_group running prefill.
             #  We currently do this after on_decode_finish,
             #  which also removes the sequence from prefill scheduler.
