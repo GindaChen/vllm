@@ -59,6 +59,8 @@ class SchedulerOutputs:
             f"blocks_to_copy={self.blocks_to_copy}, "
             f"ignored_seq_groups={self.ignored_seq_groups})")
 
+    __str__ = __repr__
+
     def is_empty(self) -> bool:
         # NOTE: We do not consider the ignored sequence groups.
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in

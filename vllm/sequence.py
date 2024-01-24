@@ -220,6 +220,8 @@ class Sequence:
                 f"status={self.status.name}, "
                 f"num_blocks={len(self.logical_token_blocks)})")
 
+    __str__ = __repr__
+
 
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
@@ -327,6 +329,8 @@ class SequenceGroup:
                 f"sampling_params={self.sampling_params}, "
                 f"num_seqs={len(self.seqs_dict)})")
 
+    __str__ = __repr__
+
 
 class SequenceGroupMetadata:
     """Metadata for a sequence group. Used to create `InputMetadata`.
@@ -356,6 +360,16 @@ class SequenceGroupMetadata:
         self.sampling_params = sampling_params
         self.block_tables = block_tables
         self.prefix = prefix
+
+    def __repr__(self):
+        return (f"SequenceGroupMetadata(request_id={self.request_id}, "
+                f"is_prompt={self.is_prompt}, "
+                f"seq_data={self.seq_data}, "
+                f"sampling_params={self.sampling_params}, "
+                f"block_tables={self.block_tables}, "
+                f"prefix={self.prefix})")
+
+    __str__ = __repr__
 
 
 class SequenceOutput:

@@ -79,7 +79,7 @@ class RequestTracker:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
         self._new_requests: asyncio.Queue[Tuple[AsyncStream,
-                                                dict]] = asyncio.Queue()
+        dict]] = asyncio.Queue()
         self.new_requests_event = None
 
     def __contains__(self, item):
@@ -138,7 +138,7 @@ class RequestTracker:
         self._finished_requests.put_nowait(request_id)
 
         if request_id not in self._request_streams or self._request_streams[
-                request_id].finished:
+            request_id].finished:
             # The request has already finished or been aborted.
             return
 
@@ -206,8 +206,8 @@ class _AsyncLLMEngine(LLMEngine):
         return self._process_model_outputs(output, scheduler_outputs)
 
     async def _invoke_dist_workers(
-            self, dist_output: DistScheduleOutput,
-            is_prefill: bool) -> Tuple[List[RequestOutput], bool]:
+        self, dist_output: DistScheduleOutput,
+        is_prefill: bool) -> Tuple[List[RequestOutput], bool]:
 
         # See the DistScheduler.schedule() as of how the scheduling actually happened
         # to avoid complex prefill / decode communication logic.
@@ -243,21 +243,49 @@ class _AsyncLLMEngine(LLMEngine):
         return step_output, is_prefill
 
     async def step_dist_async(self) -> List[RequestOutput]:
+        self.iteration_counter += 1
+        logger.info(
+            f"Starting step_dist_async() step {self.iteration_counter}.")
         assert self.parallel_config.is_disaggregate
 
         scheduler: DistScheduler = self.scheduler
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
+        logger.info(f"Create one scheduler outputs: {scheduler_outputs}.")
+        logger.info(f"Scheduler outputs properties: "
+                    f"{scheduler_outputs.is_transfer_schedule = }, "
+                    f"{len(scheduler_outputs.prefill_metadata) = },"
+                    f"{len(scheduler_outputs.decode_metadata) = }.")
         prefill_future = None
         decode_future = None
-        if scheduler_outputs.prefill_metadata or scheduler_outputs.is_transfer_schedule:
+
+        # Case 1: Block migration - must schedule both prefill and decode.
+        if scheduler_outputs.is_transfer_schedule:
+            assert scheduler.is_prefill_in_progress and scheduler.is_decode_in_progress, \
+                "Block migration must schedule both prefill and decode."
+            logger.info(f"Block migration is invoked.")
             prefill_future = self._invoke_dist_workers(scheduler_outputs,
                                                        is_prefill=True)
-        if scheduler_outputs.decode_metadata or scheduler_outputs.is_transfer_schedule:
             decode_future = self._invoke_dist_workers(scheduler_outputs,
                                                       is_prefill=False)
+            pass
+        # Case 2: Normal - can schedule either prefill or decode (or both)
+        elif scheduler_outputs.has_prefill_schedule or scheduler_outputs.has_decode_schedule:
+            if scheduler_outputs.has_prefill_schedule:
+                assert scheduler.is_prefill_in_progress, \
+                    "Prefill schedule must be invoked when prefill is in progress."
+                logger.info(f"Prefill schedule is invoked.")
+                prefill_future = self._invoke_dist_workers(scheduler_outputs,
+                                                           is_prefill=True)
+            if scheduler_outputs.has_decode_schedule:
+                assert scheduler.is_decode_in_progress, \
+                    "Decode schedule must be invoked when decode is in progress."
+                logger.info(f"Decode schedule is invoked.")
+                decode_future = self._invoke_dist_workers(scheduler_outputs,
+                                                          is_prefill=False)
 
+        # Add the futures to the pending futures set.
         if prefill_future:
             self.pending_futures.add(prefill_future)
         if decode_future:
@@ -270,14 +298,18 @@ class _AsyncLLMEngine(LLMEngine):
             self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
         self.pending_futures = pending
 
-        # FIXME: `finished` can be multiple - run a loop!!
-        output, is_prefill = await finished.pop()
-        if is_prefill:
-            scheduler.on_prefill_finish()
-        else:
-            scheduler.on_decode_finish()
+        # Prepare return result.
+        result = []
+        for future in finished:
+            output, is_prefill = await future
+            logger.info(f"Accepted a finished task {is_prefill = }.")
+            if is_prefill:
+                scheduler.on_prefill_finish()
+            else:
+                scheduler.on_decode_finish()
+            result += output
 
-        return output
+        return result
 
     async def _run_workers_async(
         self,
@@ -522,7 +554,7 @@ class AsyncLLMEngine:
                     shortened_prompt = shortened_prompt[:self.max_log_len]
                 if shortened_token_ids is not None:
                     shortened_token_ids = shortened_token_ids[:self.
-                                                              max_log_len]
+                    max_log_len]
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
                         f"prefix_pos: {prefix_pos},"

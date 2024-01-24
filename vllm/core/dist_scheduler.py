@@ -22,6 +22,14 @@ class DistScheduleOutput:
         return self.send_blocks and self.recv_blocks
 
     @property
+    def has_prefill_schedule(self):
+        return len(self.prefill_metadata) > 0
+
+    @property
+    def has_decode_schedule(self):
+        return len(self.decode_metadata) > 0
+
+    @property
     def prefill_metadata(self) -> List[SequenceGroupMetadata]:
         return self.prefill_schedule[0]
 
