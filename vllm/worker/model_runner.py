@@ -204,7 +204,7 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
-        time.sleep(2)
+        time.sleep(0.5)
         print(f"Inside _prepare_decode({seq_group_metadata_list=})")
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
@@ -239,7 +239,7 @@ class ModelRunner:
                 print(f"Get {context_len = }")
                 context_lens.append(context_len)
                 print(f"Get {context_lens = }")
-                time.sleep(5)
+                # time.sleep(5)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
                 print(f"Get {block_table = }")
