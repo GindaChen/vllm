@@ -170,13 +170,8 @@ class DistScheduler:
             self.decode_scheduler.add_seq_group(seq_group)
         # Update the blocks used in these prefill requests.
         for metadata in self._in_progress_prefill_requests_metadatas:
-            # FIXME: Retrieve the blocks from the prefill workers.
             block_tables = metadata.block_tables
-            assert len(
-                block_tables
-            ) == 1, "Only one sequence should appear in prefill (hence one block table)."
-            blocks = list(block_tables.values())[0]
-            self.prefill_memblocks[metadata.request_id] = blocks
+            self.prefill_memblocks[metadata.request_id] = block_tables
 
         # Clear the stateful states for prefill
         self._in_progress_prefill_requests = []
