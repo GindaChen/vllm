@@ -49,6 +49,16 @@ class SchedulerOutputs:
         assert not (blocks_to_swap_in and blocks_to_swap_out)
         self.ignored_seq_groups = ignored_seq_groups
 
+    def __repr__(self):
+        return (
+            f"SchedulerOutputs(scheduled_seq_groups={self.scheduled_seq_groups}, "
+            f"prompt_run={self.prompt_run}, "
+            f"num_batched_tokens={self.num_batched_tokens}, "
+            f"blocks_to_swap_in={self.blocks_to_swap_in}, "
+            f"blocks_to_swap_out={self.blocks_to_swap_out}, "
+            f"blocks_to_copy={self.blocks_to_copy}, "
+            f"ignored_seq_groups={self.ignored_seq_groups})")
+
     def is_empty(self) -> bool:
         # NOTE: We do not consider the ignored sequence groups.
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in

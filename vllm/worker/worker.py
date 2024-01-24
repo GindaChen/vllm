@@ -13,8 +13,7 @@ from vllm.model_executor.parallel_utils.communication_op import (
 from vllm.model_executor.parallel_utils.parallel_state import (
     initialize_model_parallel, get_tensor_model_parallel_src_rank,
     get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
-    get_pipeline_model_parallel_first_rank,
-    ensure_model_parallel_initialized)
+    get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner

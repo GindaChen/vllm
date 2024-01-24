@@ -249,10 +249,14 @@ class _AsyncLLMEngine(LLMEngine):
         assert isinstance(scheduler, DistScheduler)
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        prefill_future = self._invoke_dist_workers(scheduler_outputs,
-                                                   is_prefill=True)
-        decode_future = self._invoke_dist_workers(scheduler_outputs,
-                                                  is_prefill=False)
+        prefill_future = None
+        decode_future = None
+        if scheduler_outputs.prefill_metadata or scheduler_outputs.is_transfer_schedule:
+            prefill_future = self._invoke_dist_workers(scheduler_outputs,
+                                                       is_prefill=True)
+        if scheduler_outputs.decode_metadata or scheduler_outputs.is_transfer_schedule:
+            decode_future = self._invoke_dist_workers(scheduler_outputs,
+                                                      is_prefill=False)
 
         if prefill_future:
             self.pending_futures.add(prefill_future)

@@ -196,10 +196,12 @@ class DistScheduler:
             # Perform pending transfer.
             (decode_metadata, decode_output, send_blocks,
              recv_blocks) = self._schedule_decode(
-                 should_transfer_new_blocks=False)
+                 should_transfer_new_blocks=True)
             self.pending_migration_requests = [
                 g.request_id for g in decode_output.scheduled_seq_groups
             ]
+            self.is_prefill_in_progress = True
+            self.is_decode_in_progress = True
             return DistScheduleOutput(
                 # decode_schedule=(decode_metadata, decode_output),
                 send_blocks=send_blocks,
