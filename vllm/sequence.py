@@ -262,7 +262,6 @@ class SequenceGroup:
             )
             self.seqs_dict[key] = new_seq
 
-
         return
 
     @property

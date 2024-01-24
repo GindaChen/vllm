@@ -322,7 +322,8 @@ class _AsyncLLMEngine(LLMEngine):
         result = []
         for future in finished:
             output, is_prefill, is_transfer = await future
-            logger.info(f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
+            logger.info(
+                f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
