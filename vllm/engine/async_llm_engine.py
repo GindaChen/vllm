@@ -260,14 +260,14 @@ class _AsyncLLMEngine(LLMEngine):
                     f"{scheduler_outputs.has_decode_schedule = },\n"
                     )
         logger.info(f"Prefill scheduler: \n"
-                    f"{len(scheduler.prefill_scheduler.waiting) } \n"
-                    f"{len(scheduler.prefill_scheduler.running) } \n"
-                    f"{len(scheduler.prefill_scheduler.swapped) } \n"
+                    f"{len(scheduler.prefill_scheduler.waiting) = } \n"
+                    f"{len(scheduler.prefill_scheduler.running) = } \n"
+                    f"{len(scheduler.prefill_scheduler.swapped) = } \n"
                     )
         logger.info(f"Decode scheduler: \n"
-                    f"{len(scheduler.decode_scheduler.waiting) } \n"
-                    f"{len(scheduler.decode_scheduler.running) } \n"
-                    f"{len(scheduler.decode_scheduler.swapped) } \n"
+                    f"{len(scheduler.decode_scheduler.waiting) = } \n"
+                    f"{len(scheduler.decode_scheduler.running) = } \n"
+                    f"{len(scheduler.decode_scheduler.swapped) = } \n"
                     )
 
         prefill_future = None
