@@ -333,10 +333,11 @@ class _AsyncLLMEngine(LLMEngine):
         for future in finished:
             output, is_prefill, is_transfer, (start_time, step) = await future
             duration = time.time() - start_time
+            duration *= 1000
             task_name = 'prefill' if is_prefill else 'decode'
             if is_transfer:
                 task_name += '_transfer'
-            debug_pront_3(f"Accepted a finished task {step = } {task_name = } (step finished in {duration = })")
+            debug_pront_3(f"Accepted a finished task {step = } {task_name = } (step finished in {duration:.2f} ms).")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
