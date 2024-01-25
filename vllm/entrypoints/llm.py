@@ -1,3 +1,4 @@
+import time
 from typing import List, Optional, Union
 
 from tqdm import tqdm
@@ -107,7 +108,7 @@ class LLM:
         self.request_counter = Counter()
 
     def get_tokenizer(
-            self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+        self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
         return self.llm_engine.tokenizer
 
     def set_tokenizer(
@@ -156,7 +157,7 @@ class LLM:
             # Convert a single prompt to a list.
             prompts = [prompts]
         if (prompts is not None and prompt_token_ids is not None
-                and len(prompts) != len(prompt_token_ids)):
+            and len(prompts) != len(prompt_token_ids)):
             raise ValueError("The lengths of prompts and prompt_token_ids "
                              "must be the same.")
         if sampling_params is None:
@@ -204,8 +205,11 @@ class LLM:
         step_counter = 0
         while self.llm_engine.has_unfinished_requests():
             logger.info(f"Running {step_counter = }.")
+            start_time = time.perf_counter()
             step_outputs = self.llm_engine.step()
-            logger.info(f"Finish running {step_counter = }.")
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            logger.info(f"Finish running {step_counter = } in {(duration * 1000):.2f} ms.")
             step_counter += 1
             for output in step_outputs:
                 if output.finished:
