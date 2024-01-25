@@ -98,11 +98,9 @@ def run_vllm(
     # FIXME: Hack - this can be within DistLLM.
 
     # Add the requests to the engine.
-    request_counter = 0
-    prefix_pos = 0
 
-    streams = []
-    for prompt, _, output_len in requests:
+    async def drain_stream(prompt, output_len, request_id):
+        result = []
         sampling_params = SamplingParams(
             n=n,
             temperature=0.0 if use_beam_search else 1.0,
@@ -111,20 +109,7 @@ def run_vllm(
             ignore_eos=True,
             max_tokens=output_len,
         )
-        arrival_time = time.time()
-        prompt_token_ids = engine.engine.tokenizer(prompt).input_ids
-        stream = engine.engine._request_tracker.add_request(
-            request_counter,
-            prompt=prompt,
-            sampling_params=sampling_params,
-            prompt_token_ids=prompt_token_ids,
-            arrival_time=arrival_time,
-            prefix_pos=prefix_pos)
-        streams.append(stream)
-        request_counter += 1
-
-    async def drain_stream(stream):
-        result = []
+        stream = engine.generate(prompt, sampling_params, request_id)
         async for output in stream:
             result.append(output)
         return result
@@ -132,8 +117,13 @@ def run_vllm(
     async def drain_all_streams():
         result = []
         event_loop_task = asyncio.create_task(engine.run_engine_loop())
-        for stream in streams:
-            result.append(asyncio.create_task(drain_stream(stream)))
+
+        request_id = 0
+        for prompt, _, output_len in requests:
+            coro = drain_stream(prompt, output_len, request_id)
+            task = asyncio.create_task(coro)
+            result.append(task)
+            request_id += 1
         results = await asyncio.gather(*result)
         event_loop_task.cancel()
         return results
