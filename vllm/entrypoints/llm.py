@@ -5,7 +5,7 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from vllm.lora.request import LoRARequest
 from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.llm_engine import LLMEngine
+from vllm.engine.llm_engine import LLMEngine, logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
@@ -201,8 +201,12 @@ class LLM:
             pbar = tqdm(total=num_requests, desc="Processed prompts")
         # Run the engine.
         outputs: List[RequestOutput] = []
+        step_counter = 0
         while self.llm_engine.has_unfinished_requests():
+            logger.info(f"Running {step_counter = }.")
             step_outputs = self.llm_engine.step()
+            logger.info(f"Finish running {step_counter = }.")
+            step_counter += 1
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
