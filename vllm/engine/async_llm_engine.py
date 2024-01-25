@@ -249,7 +249,7 @@ class _AsyncLLMEngine(LLMEngine):
             duration = exec_end_time - exec_start_time
             duration *= 1000
             logger.info(
-                f"_invoke_dist_workers[{step = }] spent {duration:.2f} s.")
+                f"_invoke_dist_workers[{step = }] spent {duration:.2f} ms.")
 
             output = all_outputs[0]
 

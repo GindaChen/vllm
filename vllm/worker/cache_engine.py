@@ -8,7 +8,7 @@ from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.model_executor.parallel_utils.parallel_state import get_pipeline_model_parallel_next_rank, \
     get_pipeline_model_parallel_prev_rank
-from vllm.utils import in_wsl, debug_pront
+from vllm.utils import in_wsl, debug_pront, debug_pront_3
 
 logger = init_logger(__name__)
 
@@ -72,7 +72,10 @@ class CacheEngine:
     def allocate_gpu_cache(self) -> List[KVCache]:
         gpu_cache: List[KVCache] = []
         key_block_shape = self.get_key_block_shape()
+        debug_pront_3(f"At allocate_gpu_cache(), got {self.num_layers = }")
+        debug_pront_3(f"At allocate_gpu_cache(), got {key_block_shape = }")
         value_block_shape = self.get_value_block_shape()
+        debug_pront_3(f"At allocate_gpu_cache(), got {value_block_shape = }")
         for _ in range(self.num_layers):
             key_blocks = torch.empty(
                 size=(self.num_gpu_blocks, *key_block_shape),
