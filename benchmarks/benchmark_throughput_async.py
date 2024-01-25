@@ -1,4 +1,4 @@
-"""Benchmark offline inference throughput."""
+"""Benchmark offline inference throughput for DistServe."""
 import argparse
 import argparse
 import asyncio
