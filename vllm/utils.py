@@ -83,5 +83,19 @@ def set_cuda_visible_devices(device_ids: List[int]) -> None:
 # debug_pront = print
 debug_pront = lambda *_, **__: None
 debug_pront_2 = lambda *_, **__: None
+
+logger_g = None
+
+
+# debug_pront_3 = lambda *_, **__: None
+def debug_pront_3(*args, **kwargs):
+    global logger_g
+    if not logger_g:
+        from vllm.logger import init_logger
+        logger_g = init_logger(__name__)
+    logger_g.debug(*args, **kwargs)
+    return
+
+
 # debug_slept = time.sleep
 debug_slept = lambda *_, **__: None

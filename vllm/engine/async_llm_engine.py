@@ -12,7 +12,7 @@ from vllm.engine.ray_utils import initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
-from vllm.utils import debug_pront, debug_pront_2
+from vllm.utils import debug_pront, debug_pront_2, debug_pront_3
 
 logger = init_logger(__name__)
 
@@ -257,7 +257,7 @@ class _AsyncLLMEngine(LLMEngine):
         """
         self.iteration_counter += 1
         debug_pront_2("\n-------------------\n")
-        debug_pront_2(
+        debug_pront_3(
             f"Starting step_dist_async() step {self.iteration_counter}.")
         assert self.parallel_config.is_disaggregate
 
@@ -285,7 +285,7 @@ class _AsyncLLMEngine(LLMEngine):
         if scheduler_outputs.is_transfer_schedule:
             assert scheduler.is_prefill_in_progress and scheduler.is_decode_in_progress, \
                 "Block migration must schedule both prefill and decode."
-            debug_pront_2(f"Block migration is invoked.")
+            debug_pront_3(f"Block migration is invoked.")
             prefill_future = self._invoke_dist_workers(scheduler_outputs,
                                                        is_prefill=True)
             decode_future = self._invoke_dist_workers(scheduler_outputs,
@@ -296,13 +296,13 @@ class _AsyncLLMEngine(LLMEngine):
             if scheduler_outputs.has_prefill_schedule:
                 assert scheduler.is_prefill_in_progress, \
                     "Prefill schedule must be invoked when prefill is in progress."
-                debug_pront_2(f"Prefill schedule is invoked.")
+                debug_pront_3(f"Prefill schedule is invoked.")
                 prefill_future = self._invoke_dist_workers(scheduler_outputs,
                                                            is_prefill=True)
             if scheduler_outputs.has_decode_schedule:
                 assert scheduler.is_decode_in_progress, \
                     "Decode schedule must be invoked when decode is in progress."
-                debug_pront_2(f"Decode schedule is invoked.")
+                debug_pront_3(f"Decode schedule is invoked.")
                 decode_future = self._invoke_dist_workers(scheduler_outputs,
                                                           is_prefill=False)
 
