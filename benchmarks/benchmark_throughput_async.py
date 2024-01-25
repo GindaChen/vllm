@@ -142,7 +142,6 @@ def run_vllm(
     end = time.perf_counter()
 
     import pandas as pd
-    "(start_time, end_time, duration, task_name)"
     df = pd.DataFrame(
         engine.engine.event_logging,
         columns=["start_time", "end_time", "duration", "task_name"],
