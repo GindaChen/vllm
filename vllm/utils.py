@@ -82,5 +82,6 @@ def set_cuda_visible_devices(device_ids: List[int]) -> None:
 
 # debug_pront = print
 debug_pront = lambda *_, **__: None
+debug_pront_2 = lambda *_, **__: None
 # debug_slept = time.sleep
 debug_slept = lambda *_, **__: None

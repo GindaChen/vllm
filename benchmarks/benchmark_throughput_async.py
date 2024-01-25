@@ -99,6 +99,9 @@ def run_vllm(
 
     # Add the requests to the engine.
 
+    num_requests = len(requests)
+    pbar = tqdm(total=num_requests, desc="Processed prompts")
+
     async def drain_stream(prompt, output_len, request_id):
         result = []
         sampling_params = SamplingParams(
@@ -112,6 +115,7 @@ def run_vllm(
         stream = engine.generate(prompt, sampling_params, request_id)
         async for output in stream:
             result.append(output)
+        pbar.update(1)
         return result
 
     async def drain_all_streams():
@@ -124,6 +128,7 @@ def run_vllm(
             task = asyncio.create_task(coro)
             result.append(task)
             request_id += 1
+        # Gather the first completed
         results = await asyncio.gather(*result)
         event_loop_task.cancel()
         return results
