@@ -249,8 +249,12 @@ class _AsyncLLMEngine(LLMEngine):
         return step_output, is_prefill, is_transfer
 
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
-        # FIXME: Hack - decouple the concept of "running" vs "has output"
+        """
+        Step once in distserve mode.
 
+        Returns: (step_output: List[RequestOutput], is_running: bool)
+
+        """
         self.iteration_counter += 1
         debug_pront("\n-------------------\n")
         debug_pront(

@@ -210,6 +210,8 @@ class DistScheduler:
         # FIXME: Suboptimal scheduling algorithm if (actual) PP > 1.
 
         # Case 0: Transfer should be scheduled.
+        # FIXME: Suboptimal - relax the pending transfer condition such that
+        #  even if there are transfer request, we don't have to schedule it.
         if self.has_pending_transfer():
             if self.is_prefill_in_progress or self.is_decode_in_progress:
                 return DistScheduleOutput()
