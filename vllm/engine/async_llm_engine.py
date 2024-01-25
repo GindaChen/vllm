@@ -336,7 +336,7 @@ class _AsyncLLMEngine(LLMEngine):
             task_name = 'prefill' if is_prefill else 'decode'
             if is_transfer:
                 task_name += '_transfer'
-            debug_pront_3(f"Accepted a finished task {step = } {task_name = } (step finished in {duration = } ). })")
+            debug_pront_3(f"Accepted a finished task {step = } {task_name = } (step finished in {duration = })")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
