@@ -239,11 +239,18 @@ class _AsyncLLMEngine(LLMEngine):
                 f"{'Prefill pool' if is_prefill else 'Decode pool'} invoking execute_model with data: {data}"
             )
 
+            exec_start_time = time.perf_counter()
             all_outputs = await self._run_dist_worker_group_async(
                 worker_group,
                 "execute_model",
                 **data,
             )
+            exec_end_time = time.perf_counter()
+            duration = exec_end_time - exec_start_time
+            duration *= 1000
+            logger.info(
+                f"_invoke_dist_workers[{step = }] spent {duration:.2f} s.")
+
             output = all_outputs[0]
 
         step_output = self._process_model_outputs(output, scheduler_outputs)
