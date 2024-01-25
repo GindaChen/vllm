@@ -565,11 +565,13 @@ class AsyncLLMEngine:
         else:
             self.engine.abort_request(request_ids)
 
-    async def run_engine_loop(self):
+    async def run_engine_loop(self, return_at_finish=False):
         # Initialize the RequestTracker here so it uses the right event loop.
         has_requests_in_progress = False
         while True:
             if not has_requests_in_progress:
+                if return_at_finish:
+                    return
                 # Wait for new requests if there are no requests in progress.
                 debug_pront("Waiting for new requests...")
                 await self._request_tracker.wait_for_new_requests()

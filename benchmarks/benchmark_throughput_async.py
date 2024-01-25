@@ -1,6 +1,7 @@
 """Benchmark offline inference throughput."""
 import argparse
 import argparse
+import asyncio
 import json
 import random
 import time
@@ -122,8 +123,23 @@ def run_vllm(
         streams.append(stream)
         request_counter += 1
 
+    async def drain_stream(stream):
+        result = []
+        async for output in stream:
+            result.append(output)
+        return result
+
+    async def drain_all_streams():
+        result = []
+        event_loop_task = asyncio.create_task(engine.run_engine_loop())
+        for stream in streams:
+            result.append(asyncio.create_task(drain_stream(stream)))
+        results = await asyncio.gather(*result)
+        event_loop_task.cancel()
+        return results
+
     start = time.perf_counter()
-    engine.start_background_loop()
+    results = asyncio.run(drain_all_streams())
     end = time.perf_counter()
     return end - start
 
