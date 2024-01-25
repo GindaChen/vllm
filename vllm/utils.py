@@ -93,7 +93,7 @@ def debug_pront_3(*args, **kwargs):
     if not logger_g:
         from vllm.logger import init_logger
         logger_g = init_logger(__name__)
-    logger_g.debug(*args, **kwargs)
+    logger_g.info(*args, **kwargs)
     return
 
 
