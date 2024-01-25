@@ -143,6 +143,7 @@ class LLMEngine:
         # TODO: Rename to active_working_set? active_working_coros?
         self.pending_futures: Set[Coroutine] = set()
         self.iteration_counter = 0
+        self.event_logging = {}  # (start_time, end_time, duration, task_name)
 
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers

@@ -207,8 +207,8 @@ class _AsyncLLMEngine(LLMEngine):
         return self._process_model_outputs(output, scheduler_outputs)
 
     async def _invoke_dist_workers(
-            self, dist_output: DistScheduleOutput, is_prefill: bool,
-            step) -> Tuple[List[RequestOutput], bool, bool, Tuple['float', 'float']]:
+        self, dist_output: DistScheduleOutput, is_prefill: bool, step
+    ) -> Tuple[List[RequestOutput], bool, bool, Tuple['float', 'float']]:
 
         # See the DistScheduler.schedule() as of how the scheduling actually happened
         # to avoid complex prefill / decode communication logic.
@@ -332,12 +332,17 @@ class _AsyncLLMEngine(LLMEngine):
         result = []
         for future in finished:
             output, is_prefill, is_transfer, (start_time, step) = await future
-            duration = time.time() - start_time
+            end_time = time.time()
+            duration = end_time - start_time
             duration *= 1000
             task_name = 'prefill' if is_prefill else 'decode'
             if is_transfer:
                 task_name += '_transfer'
-            debug_pront_3(f"Accepted a finished task {step = } {task_name = } (step finished in {duration:.2f} ms).")
+            debug_pront_3(
+                f"Accepted a finished task {step = } {task_name = } (step finished in {duration:.2f} ms)."
+            )
+            self.event_logging[step] = (start_time, end_time, duration,
+                                        task_name)
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:

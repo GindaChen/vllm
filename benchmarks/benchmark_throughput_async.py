@@ -112,11 +112,14 @@ def run_vllm(
             ignore_eos=True,
             max_tokens=output_len,
         )
+        request_time_steps = []
+        request_time_steps.append(time.perf_counter())
         stream = engine.generate(prompt, sampling_params, request_id)
         async for output in stream:
+            request_time_steps.append(time.perf_counter())
             result.append(output)
         pbar.update(1)
-        return result
+        return request_time_steps, result
 
     async def drain_all_streams():
         result = []
@@ -134,8 +137,21 @@ def run_vllm(
         return results
 
     start = time.perf_counter()
+    # [(request_time_steps, result)]
     results = asyncio.run(drain_all_streams())
     end = time.perf_counter()
+
+    import pandas as pd
+    "(start_time, end_time, duration, task_name)"
+    df = pd.DataFrame(
+        engine.engine.event_logging,
+        columns=["start_time", "end_time", "duration", "task_name"],
+    )
+    # Store the event logging.
+    df.to_csv("event_logging.csv", index=False)
+    # also in markdown
+    df.to_markdown("event_logging.md", index=False)
+
     return end - start
 
 
