@@ -207,11 +207,12 @@ class _AsyncLLMEngine(LLMEngine):
         return self._process_model_outputs(output, scheduler_outputs)
 
     async def _invoke_dist_workers(
-            self, dist_output: DistScheduleOutput,
-            is_prefill: bool) -> Tuple[List[RequestOutput], bool, bool]:
+            self, dist_output: DistScheduleOutput, is_prefill: bool,
+            step) -> Tuple[List[RequestOutput], bool, bool, Tuple['float']]:
 
         # See the DistScheduler.schedule() as of how the scheduling actually happened
         # to avoid complex prefill / decode communication logic.
+        start_time = time.time()
         is_transfer = dist_output.is_transfer_schedule
         if is_prefill:
             seq_group_metadata_list = dist_output.prefill_metadata
@@ -246,7 +247,7 @@ class _AsyncLLMEngine(LLMEngine):
             output = all_outputs[0]
 
         step_output = self._process_model_outputs(output, scheduler_outputs)
-        return step_output, is_prefill, is_transfer
+        return step_output, is_prefill, is_transfer, (start_time, step)
 
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
         """
@@ -266,17 +267,17 @@ class _AsyncLLMEngine(LLMEngine):
 
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
         debug_pront_2(f"Scheduler outputs properties: \n"
-                    f"{scheduler_outputs.is_transfer_schedule = },\n"
-                    f"{scheduler_outputs.has_prefill_schedule = },\n"
-                    f"{scheduler_outputs.has_decode_schedule = },\n")
+                      f"{scheduler_outputs.is_transfer_schedule = },\n"
+                      f"{scheduler_outputs.has_prefill_schedule = },\n"
+                      f"{scheduler_outputs.has_decode_schedule = },\n")
         debug_pront_2(f"Prefill scheduler: \n"
-                    f"{len(scheduler.prefill_scheduler.waiting) = } \n"
-                    f"{len(scheduler.prefill_scheduler.running) = } \n"
-                    f"{len(scheduler.prefill_scheduler.swapped) = } \n")
+                      f"{len(scheduler.prefill_scheduler.waiting) = } \n"
+                      f"{len(scheduler.prefill_scheduler.running) = } \n"
+                      f"{len(scheduler.prefill_scheduler.swapped) = } \n")
         debug_pront_2(f"Decode scheduler: \n"
-                    f"{len(scheduler.decode_scheduler.waiting) = } \n"
-                    f"{len(scheduler.decode_scheduler.running) = } \n"
-                    f"{len(scheduler.decode_scheduler.swapped) = } \n")
+                      f"{len(scheduler.decode_scheduler.waiting) = } \n"
+                      f"{len(scheduler.decode_scheduler.running) = } \n"
+                      f"{len(scheduler.decode_scheduler.swapped) = } \n")
 
         prefill_future = None
         decode_future = None
@@ -286,10 +287,14 @@ class _AsyncLLMEngine(LLMEngine):
             assert scheduler.is_prefill_in_progress and scheduler.is_decode_in_progress, \
                 "Block migration must schedule both prefill and decode."
             debug_pront_3(f"Block migration is invoked.")
-            prefill_future = self._invoke_dist_workers(scheduler_outputs,
-                                                       is_prefill=True)
-            decode_future = self._invoke_dist_workers(scheduler_outputs,
-                                                      is_prefill=False)
+            prefill_future = self._invoke_dist_workers(
+                scheduler_outputs,
+                is_prefill=True,
+                step=self.iteration_counter)
+            decode_future = self._invoke_dist_workers(
+                scheduler_outputs,
+                is_prefill=False,
+                step=self.iteration_counter)
             pass
         # Case 2: Normal - can schedule either prefill or decode (or both)
         elif scheduler_outputs.has_prefill_schedule or scheduler_outputs.has_decode_schedule:
@@ -297,14 +302,18 @@ class _AsyncLLMEngine(LLMEngine):
                 assert scheduler.is_prefill_in_progress, \
                     "Prefill schedule must be invoked when prefill is in progress."
                 debug_pront_3(f"Prefill schedule is invoked.")
-                prefill_future = self._invoke_dist_workers(scheduler_outputs,
-                                                           is_prefill=True)
+                prefill_future = self._invoke_dist_workers(
+                    scheduler_outputs,
+                    is_prefill=True,
+                    step=self.iteration_counter)
             if scheduler_outputs.has_decode_schedule:
                 assert scheduler.is_decode_in_progress, \
                     "Decode schedule must be invoked when decode is in progress."
                 debug_pront_3(f"Decode schedule is invoked.")
-                decode_future = self._invoke_dist_workers(scheduler_outputs,
-                                                          is_prefill=False)
+                decode_future = self._invoke_dist_workers(
+                    scheduler_outputs,
+                    is_prefill=False,
+                    step=self.iteration_counter)
 
         # Add the futures to the pending futures set.
         if prefill_future:
@@ -326,8 +335,7 @@ class _AsyncLLMEngine(LLMEngine):
             task_name = 'prefill' if is_prefill else 'decode'
             if is_transfer:
                 task_name += '_transfer'
-            debug_pront_3(
-                f"Accepted a finished task {task_name = }.")
+            debug_pront_3(f"Accepted a finished task {task_name = }.")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
