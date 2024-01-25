@@ -323,8 +323,11 @@ class _AsyncLLMEngine(LLMEngine):
         result = []
         for future in finished:
             output, is_prefill, is_transfer = await future
-            debug_pront_2(
-                f"Accepted a finished task {is_prefill = }, {is_transfer = }.")
+            task_name = 'prefill' if is_prefill else 'decode'
+            if is_transfer:
+                task_name += '_transfer'
+            debug_pront_3(
+                f"Accepted a finished task {task_name = }.")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:

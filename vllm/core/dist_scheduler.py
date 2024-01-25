@@ -266,7 +266,8 @@ class DistScheduler:
         #  This requires block transfer supporting block allocation
         #  to be separate from the block transfer (so the block mapping
         #  does not require the block in prefill to be the same ID as block in decode).
-        raise NotImplementedError
+        self.decode_scheduler.fork_seq(parent_seq, child_seq)
+        return
 
     def free_seq(self, seq: Sequence):
         self.prefill_scheduler.free_seq(seq)
