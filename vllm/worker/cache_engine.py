@@ -88,6 +88,10 @@ class CacheEngine:
                 device="cuda",
             )
             gpu_cache.append((key_blocks, value_blocks))
+
+        a, b = gpu_cache[0]
+        debug_pront_3(f"At allocate_gpu_cache(), got {a.storage() = }")
+        debug_pront_3(f"At allocate_gpu_cache(), got {b.storage() = }")
         return gpu_cache
 
     def allocate_cpu_cache(self) -> List[KVCache]:

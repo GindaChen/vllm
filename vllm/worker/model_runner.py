@@ -15,7 +15,7 @@ from vllm.model_executor.parallel_utils.parallel_state import get_tensor_model_p
     get_tensor_model_parallel_src_rank, get_tensor_model_parallel_rank
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
-from vllm.utils import in_wsl, debug_pront, debug_slept
+from vllm.utils import in_wsl, debug_pront, debug_slept, debug_pront_3
 
 logger = init_logger(__name__)
 
@@ -487,12 +487,17 @@ class ModelRunner:
         debug_pront(
             f"Worker with {rank = } Inside execute_model({len(seq_group_metadata_list)=}, {len(kv_caches)=}, {lead_worker_rank=}, {group=})"
         )
+        debug_pront_3(f"Executing the model with {len(seq_group_metadata_list)}")
+        start_time = time.perf_counter()
         input_tokens, input_positions, input_metadata, sampling_metadata = (
             self.prepare_input_tensors(
                 seq_group_metadata_list,
                 lead_worker_rank=lead_worker_rank,
                 group=group,
             ))
+        debug_pront_3(f"prepare_input_tensors() took {time.perf_counter() - start_time:.3f} secs")
+
+        start_time = time.perf_counter()
         # Execute the model.
         if input_metadata.use_cuda_graph:
             graph_batch_size = input_tokens.shape[0]
@@ -505,12 +510,15 @@ class ModelRunner:
             kv_caches=kv_caches,
             input_metadata=input_metadata,
         )
+        debug_pront_3(f"model_executable() took {time.perf_counter() - start_time:.3f} secs")
 
         # Sample the next token.
+        start_time = time.perf_counter()
         output = self.model.sample(
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,
         )
+        debug_pront_3(f"model.sample() took {time.perf_counter() - start_time:.3f} secs")
         return output
 
     @torch.inference_mode()
