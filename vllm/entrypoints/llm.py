@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
+from vllm import AsyncLLMEngine
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.outputs import RequestOutput
@@ -221,3 +222,92 @@ class LLM:
 
     def _run_engine_disaggregate(self, use_tqdm: bool) -> List[RequestOutput]:
         return self.llm_engine.run_engine_disaggregate()
+
+
+class DistLLM:
+
+    def __init__(
+        self,
+        model: str,
+        tokenizer: Optional[str] = None,
+        tokenizer_mode: str = "auto",
+        trust_remote_code: bool = False,
+        tensor_parallel_size: int = 1,
+        dtype: str = "auto",
+        quantization: Optional[str] = None,
+        revision: Optional[str] = None,
+        tokenizer_revision: Optional[str] = None,
+        seed: int = 0,
+        gpu_memory_utilization: float = 0.9,
+        swap_space: int = 4,
+        enforce_eager: bool = False,
+        max_context_len_to_capture: int = 8192,
+        is_disaggregate: bool = True,
+        pipeline_parallel_size: int = 2,
+        is_dummy_llm:
+        bool = False,  # FIXME: (Hack) do not let llm engine initialized
+        **kwargs,
+    ) -> None:
+        if "disable_log_stats" not in kwargs:
+            kwargs["disable_log_stats"] = True
+        engine_args = EngineArgs(
+            model=model,
+            tokenizer=tokenizer,
+            tokenizer_mode=tokenizer_mode,
+            trust_remote_code=trust_remote_code,
+            tensor_parallel_size=tensor_parallel_size,
+            dtype=dtype,
+            quantization=quantization,
+            revision=revision,
+            tokenizer_revision=tokenizer_revision,
+            seed=seed,
+            gpu_memory_utilization=gpu_memory_utilization,
+            swap_space=swap_space,
+            enforce_eager=enforce_eager,
+            max_context_len_to_capture=max_context_len_to_capture,
+            is_disaggregate=is_disaggregate,
+            pipeline_parallel_size=pipeline_parallel_size,
+            **kwargs,
+        )
+        self.engine_args = engine_args
+        self.request_counter = Counter()
+        if is_dummy_llm:
+            return
+        self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
+
+    def get_tokenizer(
+            self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+        return self.llm_engine.engine.tokenizer
+
+    def set_tokenizer(
+        self,
+        tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
+    ) -> None:
+        self.llm_engine.tokenizer = tokenizer
+
+    def generate(
+        self,
+        prompts: Optional[Union[str, List[str]]] = None,
+        sampling_params: Optional[SamplingParams] = None,
+        prompt_token_ids: Optional[List[List[int]]] = None,
+        prefix_pos: Optional[Union[int, List[int]]] = None,
+        use_tqdm: bool = True,
+    ) -> List[RequestOutput]:
+        raise NotImplementedError
+        pass
+
+    def _add_request(
+        self,
+        prompt: Optional[str],
+        sampling_params: SamplingParams,
+        prompt_token_ids: Optional[List[int]],
+        prefix_pos: Optional[int] = None,
+    ) -> None:
+        raise NotImplementedError
+        pass
+
+    def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
+        raise NotImplementedError
+        pass
+
+    pass

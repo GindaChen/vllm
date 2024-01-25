@@ -34,7 +34,6 @@ async def main():
                                            str(request_id))
         result_generators.append(gen)
 
-
     # Async get whatever is available from the `result_generators`
     # and print the results: print(f"[User] At user level, received output for request: {request_output = }")
     final_output = []
