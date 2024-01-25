@@ -178,7 +178,7 @@ def main(args: argparse.Namespace):
           f"{total_num_tokens / elapsed_time:.2f} tokens/s")
 
 
-def get_parser():
+def get_parsed_args():
     parser = argparse.ArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend",
                         type=str,
@@ -270,10 +270,9 @@ def get_parser():
         if args.tokenizer != args.model:
             raise ValueError("Tokenizer must be the same as the model for MII "
                              "backend.")
-    return parser
+    return args
 
 
 if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
+    args = get_parsed_args()
     main(args)
