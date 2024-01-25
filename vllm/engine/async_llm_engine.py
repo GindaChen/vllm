@@ -206,9 +206,9 @@ class _AsyncLLMEngine(LLMEngine):
 
         return self._process_model_outputs(output, scheduler_outputs)
 
-    async def _invoke_dist_workers(
-        self, dist_output: DistScheduleOutput, is_prefill: bool, step
-    ) -> Tuple[List[RequestOutput], bool, bool, Tuple['float', 'float']]:
+    async def _invoke_dist_workers(self, dist_output: DistScheduleOutput,
+                                   is_prefill: bool,
+                                   step) -> Tuple[List[RequestOutput], Dict]:
 
         # See the DistScheduler.schedule() as of how the scheduling actually happened
         # to avoid complex prefill / decode communication logic.
@@ -247,7 +247,13 @@ class _AsyncLLMEngine(LLMEngine):
             output = all_outputs[0]
 
         step_output = self._process_model_outputs(output, scheduler_outputs)
-        return step_output, is_prefill, is_transfer, (start_time, step)
+        return step_output, dict(
+            is_prefill=is_prefill,
+            is_transfer=is_transfer,
+            start_time=start_time,
+            step=step,
+            transfer_blocks=len(dist_output.send_blocks) if is_transfer else 0,
+        )
 
     async def step_dist_async(self) -> Tuple[List[RequestOutput], bool]:
         """
@@ -331,18 +337,32 @@ class _AsyncLLMEngine(LLMEngine):
         # Prepare return result.
         result = []
         for future in finished:
-            output, is_prefill, is_transfer, (start_time, step) = await future
+            output, return_meta = await future
+
+            # Grab logging metadata
+            is_prefill = return_meta['is_prefill']
+            is_transfer = return_meta['is_transfer']
+            start_time = return_meta['start_time']
+            step = return_meta['step']
+            transfer_blocks = return_meta['transfer_blocks']
             end_time = time.time()
             duration = end_time - start_time
             duration *= 1000
+
+            # Log the metadata
             task_name = 'prefill' if is_prefill else 'decode'
             if is_transfer:
                 task_name += '_transfer'
-            debug_pront_3(
-                f"Accepted a finished task {step = } {task_name = } (step finished in {duration:.2f} ms)."
-            )
-            self.event_logging[step] = (start_time, end_time, duration,
-                                        task_name)
+
+            if is_transfer:
+                debug_pront_3(
+                    f"Accepted a finished task {step = } {task_name = } "
+                    f"(step finished in {duration:.2f} ms, "
+                    f"block transferred = {transfer_blocks}).")
+            else:
+                debug_pront_3(
+                    f"Accepted a finished task {step = } {task_name = } "
+                    f"(step finished in {duration:.2f} ms).")
             if is_prefill:
                 scheduler.on_prefill_finish(is_transfer=is_transfer)
             else:
