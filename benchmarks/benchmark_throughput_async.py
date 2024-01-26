@@ -141,15 +141,18 @@ def run_vllm(
     results = asyncio.run(drain_all_streams())
     end = time.perf_counter()
 
-    import pandas as pd
-    df = pd.DataFrame(
-        engine.engine.event_logging,
-        columns=["start_time", "end_time", "duration", "task_name"],
-    )
-    # Store the event logging.
-    df.to_csv("event_logging.csv", index=False)
-    # also in markdown
-    df.to_markdown("event_logging.md", index=False)
+    try:
+        import pandas as pd
+        df = pd.DataFrame(
+            engine.engine.event_logging,
+            columns=["start_time", "end_time", "duration", "task_name"],
+        )
+        # Store the event logging.
+        df.to_csv("event_logging.csv", index=False)
+        # also in markdown
+        df.to_markdown("event_logging.md", index=False)
+    except:
+        pass
 
     return end - start
 
@@ -206,7 +209,7 @@ def get_parsed_args():
                         type=int,
                         default=None,
                         help="Output length for each request. Overrides the "
-                        "output length from the dataset.")
+                             "output length from the dataset.")
     parser.add_argument("--model", type=str, default="facebook/opt-125m")
     parser.add_argument("--tokenizer", type=str, default=None)
     parser.add_argument('--quantization',
@@ -236,16 +239,16 @@ def get_parsed_args():
         type=int,
         default=None,
         help='Maximum length of a sequence (including prompt and output). '
-        'If None, will be derived from the model.')
+             'If None, will be derived from the model.')
     parser.add_argument(
         '--dtype',
         type=str,
         default='auto',
         choices=['auto', 'half', 'float16', 'bfloat16', 'float', 'float32'],
         help='data type for model weights and activations. '
-        'The "auto" option will use FP16 precision '
-        'for FP32 and FP16 models, and BF16 precision '
-        'for BF16 models.')
+             'The "auto" option will use FP16 precision '
+             'for FP32 and FP16 models, and BF16 precision '
+             'for BF16 models.')
     parser.add_argument("--enforce-eager",
                         action="store_true",
                         help="enforce eager execution")
