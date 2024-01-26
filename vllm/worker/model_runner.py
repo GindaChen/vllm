@@ -484,7 +484,7 @@ class ModelRunner:
         group=None,
     ) -> Optional[SamplerOutput]:
         rank = torch.distributed.get_rank()
-        debug_pront(
+        debug_pront_3(
             f"Worker with {rank = } Inside execute_model({len(seq_group_metadata_list)=}, {len(kv_caches)=}, {lead_worker_rank=}, {group=})"
         )
         debug_pront_3(f"Executing the model with {len(seq_group_metadata_list)}")
