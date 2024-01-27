@@ -99,3 +99,44 @@ def debug_pront_3(*args, **kwargs):
 
 # debug_slept = time.sleep
 debug_slept = lambda *_, **__: None
+
+
+def tensor_size_in_bytes(tensor):
+    """
+    Calculate the size of a tensor in bytes.
+
+    Args:
+    tensor (torch.Tensor): The tensor for which to calculate the size.
+
+    Returns:
+    int: The size of the tensor in bytes.
+    """
+    return tensor.nelement() * tensor.element_size()
+
+
+def human_readable_size(size_in_bytes):
+    """
+    Convert a size in bytes to a human readable string.
+
+    Args:
+    size_in_bytes (int): The size in bytes.
+
+    Returns:
+    str: The human readable size.
+    """
+    if size_in_bytes < 1024:
+        return f"{size_in_bytes} B"
+    elif size_in_bytes < 1024 ** 2:
+        return f"{size_in_bytes / 1024:.2f} KB"
+    elif size_in_bytes < 1024 ** 3:
+        return f"{size_in_bytes / 1024 ** 2:.2f} MB"
+    elif size_in_bytes < 1024 ** 4:
+        return f"{size_in_bytes / 1024 ** 3:.2f} GB"
+    elif size_in_bytes < 1024 ** 5:
+        return f"{size_in_bytes / 1024 ** 4:.2f} TB"
+    else:
+        return f"{size_in_bytes / 1024 ** 5:.2f} PB"
+
+
+def tensor_size_in_bytes_human_readable(tensor):
+    return human_readable_size(tensor_size_in_bytes(tensor))
