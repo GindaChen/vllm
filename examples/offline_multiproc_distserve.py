@@ -1,7 +1,9 @@
+import asyncio
 import dataclasses
 import multiprocessing
+import socket
 from multiprocessing import Process
-from typing import Union, Callable
+from typing import Union, Callable, List
 
 from vllm import LLM, SamplingParams
 from vllm.logger import init_logger
@@ -29,8 +31,25 @@ llm = LLM(
 engine_args = llm.engine_args
 model_config, cache_config, parallel_config, scheduler_config, lora_config = engine_args.create_engine_configs()
 # FIXME: Hack - avoid using ray naturally.
-parallel_config.pipeline_parallel_size = 2
-parallel_config.world_size = 2
+parallel_config.pipeline_parallel_size = 1
+parallel_config.world_size = 1
+
+
+def get_distributed_method() -> str:
+    def get_ip() -> str:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # Doesn't need to be reachable
+        return s.getsockname()[0]
+
+    def get_open_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+    def get_distributed_init_method(ip: str, port: int) -> str:
+        return f"tcp://{ip}:{port}"
+
+    return get_distributed_init_method(get_ip(), get_open_port())
 
 
 # Then use the configs to construct workers in a different process.
@@ -67,7 +86,7 @@ def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_
     return
 
 
-distributed_init_method = 'tcp://localhost:12345'
+distributed_init_method = get_distributed_method()
 
 
 class WorkerProcess:
@@ -111,7 +130,16 @@ class WorkerProcess:
         return result
 
 
-def setup_worker(worker):
+def setup_worker_comm(workers: List[WorkerProcess]):
+    tasks = []
+    for worker in workers:
+        task = worker.invoke_async(Worker.init_communication)
+        tasks.append(task)
+    asyncio.run(asyncio.gather(*tasks))
+    return
+
+
+def setup_worker(worker: WorkerProcess):
     worker.invoke(Worker.init_model)
     worker.invoke(Worker.load_model)
     cache_config.num_gpu_blocks = 10000
@@ -127,6 +155,6 @@ if __name__ == '__main__':
         distributed_init_method=distributed_init_method,
     ).start_worker_loop()
     logger.info("Worker process created. Start to setup the worker.")
-
+    setup_worker_comm([prefill_worker])
     setup_worker(prefill_worker)
     prefill_worker.invoke(None)

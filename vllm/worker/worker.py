@@ -12,7 +12,7 @@ from vllm.model_executor import set_random_seed
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.parallel_state import (
-    ensure_model_parallel_initialized)
+    ensure_model_parallel_initialized, debug__cuda_comm_timeout)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
@@ -61,6 +61,11 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
+    def init_communication(self) -> None:
+        _init_distributed_environment(self.parallel_config, self.rank,
+                                      self.distributed_init_method)
+        return
+
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
         # the synchronization point. This causes the memory usage to grow
@@ -77,9 +82,10 @@ class Worker:
 
         _check_if_gpu_supports_dtype(self.model_config.dtype)
 
-        # Initialize the distributed environment.
-        _init_distributed_environment(self.parallel_config, self.rank,
-                                      self.distributed_init_method)
+        # FIXME: (Hack) Distributed environment init happens in another function call.
+        # # Initialize the distributed environment.
+        # _init_distributed_environment(self.parallel_config, self.rank,
+        #                               self.distributed_init_method)
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
@@ -237,11 +243,13 @@ def _init_distributed_environment(
             "distributed_init_method must be set if torch.distributed "
             "is not already initialized")
     else:
+
         torch.distributed.init_process_group(
             backend="nccl",
             world_size=parallel_config.world_size,
             rank=rank,
             init_method=distributed_init_method,
+            timeout=debug__cuda_comm_timeout
         )
 
     # A small all_reduce for warmup.
