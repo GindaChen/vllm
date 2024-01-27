@@ -82,6 +82,7 @@ class LLM:
         swap_space: int = 4,
         enforce_eager: bool = False,
         max_context_len_to_capture: int = 8192,
+        is_dummy=False,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -103,6 +104,9 @@ class LLM:
             max_context_len_to_capture=max_context_len_to_capture,
             **kwargs,
         )
+        if is_dummy:
+            self.engine_args = engine_args
+            return
         self.llm_engine = LLMEngine.from_engine_args(engine_args)
         self.request_counter = Counter()
 
