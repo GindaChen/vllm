@@ -136,6 +136,7 @@ def setup_worker_comm(workers: List[WorkerProcess]):
         task = worker.invoke_async(Worker.init_communication)
         tasks.append(task)
     asyncio.run(asyncio.gather(*tasks))
+    logger.info("Communication initialized for all workers.")
     return
 
 
