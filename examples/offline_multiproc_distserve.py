@@ -7,7 +7,6 @@ from typing import Union, Callable, List
 
 from vllm import LLM, SamplingParams
 from vllm.logger import init_logger
-from vllm.worker.worker import Worker
 
 logger = init_logger(__name__)
 
@@ -30,9 +29,9 @@ llm = LLM(
 )
 engine_args = llm.engine_args
 model_config, cache_config, parallel_config, scheduler_config, lora_config = engine_args.create_engine_configs()
+
+
 # FIXME: Hack - avoid using ray naturally.
-parallel_config.pipeline_parallel_size = 1
-parallel_config.world_size = 1
 
 
 def get_distributed_method() -> str:
@@ -56,6 +55,7 @@ def get_distributed_method() -> str:
 # The worker should also have a mechanism to communicate with the main process.
 
 def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_method):
+    from vllm.worker.worker import Worker
     # Create a worker.
     logger.info(f"Creating a worker with local_rank={local_rank}, rank={rank}")
     worker = Worker(
@@ -70,17 +70,17 @@ def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_
 
     # Then for each task from the task queue,
     # call the methods of the worker to process the task.
-    logger.info("Worker created. Waiting for tasks...")
+    logger.info(f"Worker({worker.rank}) created. Waiting for tasks...")
     while True:
         task = task_queue.get()
         func_name, args, kwargs = task
         if task is None or func_name is None:
             return
-        logger.info(f"Received a task: {task}")
+        logger.info(f"Worker({worker.rank}) Received a task: {task}")
 
         func = getattr(worker, func_name)
         result = func(*args, **kwargs)
-        logger.info(f"Task {task} processed.")
+        logger.info(f"Worker({worker.rank}) Task {task} processed.")
         result_queue.put(result)
 
     return
@@ -121,41 +121,63 @@ class WorkerProcess:
         return result
 
     async def invoke_async(self, func_name: Union[str, Callable], *args, **kwargs):
+        logger.info(f"[Worker({self.rank})] Invoking {func_name} with args={args}, kwargs={kwargs}")
         if callable(func_name):
             func_name = func_name.__name__
         self.is_idle = False
         self.task_queue.put((func_name, args, kwargs))
-        result = await self.result_queue.get()
+        while True:
+            try:
+                result = self.result_queue.get(timeout=0)
+                break
+            except multiprocessing.queues.Empty:
+                await asyncio.sleep(0)
         self.is_idle = True
         return result
+
+    def kill(self):
+        _none = (None, None, None)
+        self.task_queue.put(_none)
+        self.proc.join()
+        return
 
 
 def setup_worker_comm(workers: List[WorkerProcess]):
     tasks = []
     for worker in workers:
-        task = worker.invoke_async(Worker.init_communication)
+        task = worker.invoke_async("init_communication")
         tasks.append(task)
-    asyncio.run(asyncio.gather(*tasks))
+    main_loop = asyncio.get_event_loop()
+    main_loop.run_until_complete(asyncio.wait(tasks, ))
     logger.info("Communication initialized for all workers.")
     return
 
 
 def setup_worker(worker: WorkerProcess):
-    worker.invoke(Worker.init_model)
-    worker.invoke(Worker.load_model)
+    worker.invoke("init_model")
+    worker.invoke("load_model")
     cache_config.num_gpu_blocks = 10000
     cache_config.num_cpu_blocks = 10000
-    worker.invoke(Worker.init_cache_engine, cache_config)
-    worker.invoke(Worker.warm_up_model)
+    worker.invoke("init_cache_engine", cache_config)
+    worker.invoke("warm_up_model")
 
 
 if __name__ == '__main__':
     logger.info("Creating a worker process...")
+    parallel_config.pipeline_parallel_size = 2
+    parallel_config.world_size = 2
+
     prefill_worker = WorkerProcess(
         local_rank=0, rank=0,
         distributed_init_method=distributed_init_method,
     ).start_worker_loop()
+    decode_worker = WorkerProcess(
+        local_rank=1, rank=1,
+        distributed_init_method=distributed_init_method,
+    ).start_worker_loop()
+
     logger.info("Worker process created. Start to setup the worker.")
-    setup_worker_comm([prefill_worker])
+    setup_worker_comm([prefill_worker, decode_worker])
     setup_worker(prefill_worker)
-    prefill_worker.invoke(None)
+    setup_worker(prefill_worker)
+    prefill_worker.kill()
