@@ -147,7 +147,7 @@ class CacheEngine:
         total_size = 0
         for block_id in block_ids:
             for i in range(self.num_layers):
-                debug_pront_3(f"Sending block: {block_id} from layer {i}")
+                # debug_pront_3(f"Sending block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.isend(a, dst=rank)
@@ -172,7 +172,7 @@ class CacheEngine:
         total_size = 0
         for block_id in block_ids:
             for i in range(self.num_layers):
-                debug_pront_3(f"Receiving block: {block_id} from layer {i}")
+                # debug_pront_3(f"Receiving block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.irecv(a, src=rank)
