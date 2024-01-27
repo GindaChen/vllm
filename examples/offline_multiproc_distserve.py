@@ -4,8 +4,8 @@ from multiprocessing import Process
 from typing import Union, Callable
 
 from vllm import LLM, SamplingParams
-from vllm.worker.worker import Worker
 from vllm.logger import init_logger
+from vllm.worker.worker import Worker
 
 logger = init_logger(__name__)
 
@@ -54,12 +54,14 @@ def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_
     logger.info("Worker created. Waiting for tasks...")
     while True:
         task = task_queue.get()
-        if task is None:
+        func_name, args, kwargs = task
+        if task is None or func_name is None:
             return
         logger.info(f"Received a task: {task}")
-        func_name, args, kwargs = task
+
         func = getattr(worker, func_name)
         result = func(*args, **kwargs)
+        logger.info(f"Task {task} processed.")
         result_queue.put(result)
 
     return
@@ -127,3 +129,4 @@ if __name__ == '__main__':
     logger.info("Worker process created. Start to setup the worker.")
 
     setup_worker(prefill_worker)
+    prefill_worker.invoke(None)
