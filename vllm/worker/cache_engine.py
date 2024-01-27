@@ -1,4 +1,5 @@
 """CacheEngine class for managing the KV cache."""
+import time
 from typing import Dict, List, Tuple
 
 import torch
@@ -141,6 +142,7 @@ class CacheEngine:
     def send_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
+        start_time = time.time()
         debug_pront_3(f"Sending blocks {block_ids = } to {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
@@ -153,12 +155,16 @@ class CacheEngine:
         # for task in tasks:
         #     debug_pront(f"Waiting for task: {task}")
         #     task.wait()
-        debug_pront_3(f"Done sending blocks {block_ids = } to {rank = }")
+        end_time = time.time()
+        duration = end_time - start_time
+        duration *= 1000
+        debug_pront_3(f"Done sending blocks {block_ids = } to {rank = } in {duration} ms")
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
+        start_time = time.time()
         debug_pront_3(f"Receiving blocks {block_ids = } from {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
@@ -171,7 +177,10 @@ class CacheEngine:
         for i, task in enumerate(tasks):
             debug_pront(f"Waiting for task: {i}")
             task.wait()
-        debug_pront_3(f"Done receiving blocks {block_ids = } from {rank = }")
+        end_time = time.time()
+        duration = end_time - start_time
+        duration *= 1000
+        debug_pront_3(f"Done receiving blocks {block_ids = } from {rank = } in {duration} ms")
         return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
