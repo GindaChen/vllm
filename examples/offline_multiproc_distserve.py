@@ -5,6 +5,9 @@ from typing import Union, Callable
 
 from vllm import LLM, SamplingParams
 from vllm.worker.worker import Worker
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 # Sample prompts.
 prompts = [
@@ -33,14 +36,9 @@ parallel_config.world_size = 2
 # Then use the configs to construct workers in a different process.
 # The worker should also have a mechanism to communicate with the main process.
 
-
-@dataclasses.dataclass()
-class Task:
-    pass
-
-
 def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_method):
     # Create a worker.
+    logger.info(f"Creating a worker with local_rank={local_rank}, rank={rank}")
     worker = Worker(
         model_config=model_config,
         parallel_config=parallel_config,
@@ -53,12 +51,12 @@ def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_
 
     # Then for each task from the task queue,
     # call the methods of the worker to process the task.
-
+    logger.info("Worker created. Waiting for tasks...")
     while True:
         task = task_queue.get()
         if task is None:
             return
-
+        logger.info(f"Received a task: {task}")
         func_name, args, kwargs = task
         func = getattr(worker, func_name)
         result = func(*args, **kwargs)
@@ -121,9 +119,11 @@ def setup_worker(worker):
 
 
 if __name__ == '__main__':
+    logger.info("Creating a worker process...")
     prefill_worker = WorkerProcess(
         local_rank=0, rank=0,
         distributed_init_method=distributed_init_method,
     ).start_worker_loop()
+    logger.info("Worker process created. Start to setup the worker.")
 
     setup_worker(prefill_worker)
