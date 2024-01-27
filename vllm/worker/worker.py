@@ -64,12 +64,12 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
-    def init_communication(self) -> None:
-        logger.info(f"Initializing communication for rank {self.rank}")
-        _init_distributed_environment(self.parallel_config, self.rank,
-                                      self.distributed_init_method)
-        logger.info(f"Communication initialized for rank {self.rank}")
-        return
+    # def init_communication(self) -> None:
+    #     logger.info(f"Initializing communication for rank {self.rank}")
+    #     _init_distributed_environment(self.parallel_config, self.rank,
+    #                                   self.distributed_init_method)
+    #     logger.info(f"Communication initialized for rank {self.rank}")
+    #     return
 
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
@@ -89,8 +89,8 @@ class Worker:
 
         # FIXME: (Hack) Distributed environment init happens in another function call.
         # # Initialize the distributed environment.
-        # _init_distributed_environment(self.parallel_config, self.rank,
-        #                               self.distributed_init_method)
+        _init_distributed_environment(self.parallel_config, self.rank,
+                                      self.distributed_init_method)
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)

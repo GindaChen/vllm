@@ -70,17 +70,17 @@ def worker_process(task_queue, result_queue, local_rank, rank, distributed_init_
 
     # Then for each task from the task queue,
     # call the methods of the worker to process the task.
-    logger.info(f"Worker({worker.rank}) created. Waiting for tasks...")
+    logger.info(f"Worker({worker.rank}) Waiting for tasks...")
     while True:
         task = task_queue.get()
         func_name, args, kwargs = task
         if task is None or func_name is None:
             return
-        logger.info(f"Worker({worker.rank}) Received a task: {task}")
+        logger.info(f"Worker({worker.rank}) Received task: {task}")
 
         func = getattr(worker, func_name)
         result = func(*args, **kwargs)
-        logger.info(f"Worker({worker.rank}) Task {task} processed.")
+        logger.info(f"Worker({worker.rank}) Finished task: {task}.")
         result_queue.put(result)
 
     return
@@ -142,24 +142,23 @@ class WorkerProcess:
         return
 
 
-def setup_worker_comm(workers: List[WorkerProcess]):
-    tasks = []
-    for worker in workers:
-        task = worker.invoke_async("init_communication")
-        tasks.append(task)
+def setup_workers(workers: List[WorkerProcess]):
+    async def _setup_comm(worker):
+        worker.invoke("init_model")
+
+    async def _setup_worker(worker):
+
+        worker.invoke("load_model")
+        cache_config.num_gpu_blocks = 10000
+        cache_config.num_cpu_blocks = 10000
+        worker.invoke("init_cache_engine", cache_config)
+        worker.invoke("warm_up_model")
+        return
+
     main_loop = asyncio.get_event_loop()
-    main_loop.run_until_complete(asyncio.wait(tasks, ))
-    logger.info("Communication initialized for all workers.")
+    main_loop.run_until_complete(asyncio.gather(*[_setup_comm(worker) for worker in workers]))
+    main_loop.run_until_complete(asyncio.gather(*[_setup_worker(worker) for worker in workers]))
     return
-
-
-def setup_worker(worker: WorkerProcess):
-    worker.invoke("init_model")
-    worker.invoke("load_model")
-    cache_config.num_gpu_blocks = 10000
-    cache_config.num_cpu_blocks = 10000
-    worker.invoke("init_cache_engine", cache_config)
-    worker.invoke("warm_up_model")
 
 
 if __name__ == '__main__':
@@ -177,7 +176,5 @@ if __name__ == '__main__':
     ).start_worker_loop()
 
     logger.info("Worker process created. Start to setup the worker.")
-    setup_worker_comm([prefill_worker, decode_worker])
-    setup_worker(prefill_worker)
-    setup_worker(prefill_worker)
+    setup_workers([prefill_worker, decode_worker])
     prefill_worker.kill()
