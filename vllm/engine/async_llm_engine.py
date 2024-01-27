@@ -80,7 +80,7 @@ class RequestTracker:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
         self._new_requests: asyncio.Queue[Tuple[AsyncStream,
-                                                dict]] = asyncio.Queue()
+        dict]] = asyncio.Queue()
         self.new_requests_event = None
 
     def __contains__(self, item):
@@ -139,7 +139,7 @@ class RequestTracker:
         self._finished_requests.put_nowait(request_id)
 
         if request_id not in self._request_streams or self._request_streams[
-                request_id].finished:
+            request_id].finished:
             # The request has already finished or been aborted.
             return
 
@@ -269,8 +269,8 @@ class _AsyncLLMEngine(LLMEngine):
         Returns: (step_output: List[RequestOutput], is_running: bool)
 
         """
+        start_step_time = time.perf_counter()
         self.iteration_counter += 1
-        debug_pront_2("\n-------------------\n")
         debug_pront_3(
             f"Starting step_dist_async() step {self.iteration_counter}.")
         assert self.parallel_config.is_disaggregate
@@ -278,19 +278,12 @@ class _AsyncLLMEngine(LLMEngine):
         scheduler: DistScheduler = self.scheduler
         assert isinstance(scheduler, DistScheduler)
 
+        debug_pront_3(f"Start scheduling tasks.")
+        start_time = time.perf_counter()
         scheduler_outputs: DistScheduleOutput = scheduler.schedule()
-        debug_pront_2(f"Scheduler outputs properties: \n"
-                      f"{scheduler_outputs.is_transfer_schedule = },\n"
-                      f"{scheduler_outputs.has_prefill_schedule = },\n"
-                      f"{scheduler_outputs.has_decode_schedule = },\n")
-        debug_pront_2(f"Prefill scheduler: \n"
-                      f"{len(scheduler.prefill_scheduler.waiting) = } \n"
-                      f"{len(scheduler.prefill_scheduler.running) = } \n"
-                      f"{len(scheduler.prefill_scheduler.swapped) = } \n")
-        debug_pront_2(f"Decode scheduler: \n"
-                      f"{len(scheduler.decode_scheduler.waiting) = } \n"
-                      f"{len(scheduler.decode_scheduler.running) = } \n"
-                      f"{len(scheduler.decode_scheduler.swapped) = } \n")
+        end_time = time.perf_counter()
+        duration = f"{(1000 * (end_time - start_time)):.2f}"
+        debug_pront_3(f"Finished scheduling tasks in {duration} ms.")
 
         prefill_future = None
         decode_future = None
@@ -337,9 +330,14 @@ class _AsyncLLMEngine(LLMEngine):
         if not self.pending_futures:
             return [], False
 
+        debug_pront_3(f"Start async.wait() on the step loop.")
+        start_time = time.perf_counter()
         finished, pending = await asyncio.wait(
             self.pending_futures, return_when=asyncio.FIRST_COMPLETED)
         self.pending_futures = pending
+        end_time = time.perf_counter()
+        duration = f"{(1000 * (end_time - start_time)):.2f}"
+        debug_pront_3(f"Finished async.wait() in {duration} ms.")
 
         # Prepare return result.
         result = []
@@ -375,18 +373,10 @@ class _AsyncLLMEngine(LLMEngine):
             else:
                 scheduler.on_decode_finish(is_transfer=is_transfer)
             result += output
-        debug_pront_2(
-            f"Finished step_dist_async() step {self.iteration_counter}.")
-        debug_pront_2(f"Obtain result: {result = }.")
 
-        debug_pront_2(
-            f"Scheduler properties: \n"
-            f"{scheduler.is_prefill_in_progress = }, \n"
-            f"{scheduler.is_decode_in_progress = }, \n"
-            f"{scheduler._in_progress_prefill_requests = }, \n"
-            f"{scheduler._in_progress_prefill_requests_metadatas = }, \n"
-            f"{scheduler.prefill_memblocks = }, \n"
-            f"{scheduler.pending_migration_requests = }, \n")
+        end_step_time = time.perf_counter()
+        duration = f"{(1000 * (end_step_time - start_step_time)):.2f}"
+        debug_pront_3(f"Finished step_dist_async() in {duration} ms.")
 
         return result, True
 
@@ -640,7 +630,7 @@ class AsyncLLMEngine:
                     shortened_prompt = shortened_prompt[:self.max_log_len]
                 if shortened_token_ids is not None:
                     shortened_token_ids = shortened_token_ids[:self.
-                                                              max_log_len]
+                    max_log_len]
             # logger.info(f"Received request {request_id}: "
             #             f"prompt: {shortened_prompt!r}, "
             #             f"prefix_pos: {prefix_pos},"
