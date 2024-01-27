@@ -9,7 +9,7 @@ from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.model_executor.parallel_utils.parallel_state import get_pipeline_model_parallel_next_rank, \
     get_pipeline_model_parallel_prev_rank
-from vllm.utils import in_wsl, debug_pront, debug_pront_3, tensor_size_in_bytes
+from vllm.utils import in_wsl, debug_pront, debug_pront_3, tensor_size_in_bytes, human_readable_size
 
 logger = init_logger(__name__)
 
@@ -160,6 +160,7 @@ class CacheEngine:
         end_time = time.time()
         duration = end_time - start_time
         duration *= 1000
+        total_size = human_readable_size(total_size)
         debug_pront_3(f"Done sending blocks {len(block_ids) = } ({total_size = }) to {rank = } in {duration} ms")
         return
 
@@ -182,6 +183,7 @@ class CacheEngine:
         end_time = time.time()
         duration = end_time - start_time
         duration *= 1000
+        total_size = human_readable_size(total_size)
         debug_pront_3(f"Done receiving (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms")
         for i, task in enumerate(tasks):
             task.wait()
