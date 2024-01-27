@@ -85,7 +85,7 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata, List[int],
-               List[int]]:
+    List[int]]:
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -204,8 +204,6 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
-        debug_slept(0.5)
-        debug_pront(f"Inside _prepare_decode({seq_group_metadata_list=})")
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -213,41 +211,27 @@ class ModelRunner:
         context_lens: List[int] = []
         block_tables: List[List[int]] = []
 
-        debug_pront("Start iteration of the seq_group_metadata_list")
         for seq_group_metadata in seq_group_metadata_list:
-            debug_pront(f"Get {seq_group_metadata = }")
             assert not seq_group_metadata.is_prompt
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
-            debug_pront(f"Get {seq_ids = }")
             for seq_id in seq_ids:
-                debug_pront(f"Iterate on {seq_id = }")
                 seq_data = seq_group_metadata.seq_data[seq_id]
-                debug_pront(f"Get {seq_data = }")
                 generation_token = seq_data.get_last_token_id()
-                debug_pront(f"Get {generation_token = }")
                 input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
-                debug_pront(f"Get {seq_len = }")
-                debug_pront(f"Get {self.sliding_window = }")
                 position = seq_len - 1
                 input_positions.append([position])
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
-                debug_pront(f"Get {context_len = }")
                 context_lens.append(context_len)
-                debug_pront(f"Get {context_lens = }")
 
                 block_table = seq_group_metadata.block_tables[seq_id]
-                debug_pront(f"Get {block_table = }")
                 block_number = block_table[position // self.block_size]
-                debug_pront(f"Get {block_number = }")
                 block_offset = position % self.block_size
-                debug_pront(f"Get {block_offset = }")
                 slot = block_number * self.block_size + block_offset
-                debug_pront(f"Get {slot = }")
                 slot_mapping.append([slot])
 
                 if self.sliding_window is not None:
@@ -256,12 +240,8 @@ class ModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-        debug_pront(f"Finished iteration of the seq_group_metadata_list")
         batch_size = len(input_tokens)
 
-        debug_pront(f"Get {batch_size = }")
-        debug_pront(f"Get {input_tokens = }")
-        debug_pront(f"Get {context_lens = }")
         max_context_len = max(context_lens)
         use_captured_graph = (
             not self.model_config.enforce_eager
@@ -359,7 +339,7 @@ class ModelRunner:
 
                 categorized_sample_indices[
                     sampling_params.sampling_type].append(
-                        categorized_sample_indices_start_idx)
+                    categorized_sample_indices_start_idx)
                 categorized_sample_indices_start_idx += 1
 
                 if sampling_params.prompt_logprobs is not None:
@@ -378,8 +358,8 @@ class ModelRunner:
 
                 categorized_sample_indices[
                     sampling_params.sampling_type].extend(
-                        range(categorized_sample_indices_start_idx,
-                              categorized_sample_indices_start_idx + num_seqs))
+                    range(categorized_sample_indices_start_idx,
+                          categorized_sample_indices_start_idx + num_seqs))
                 categorized_sample_indices_start_idx += num_seqs
 
         selected_token_indices = _async_h2d(selected_token_indices,
@@ -443,7 +423,7 @@ class ModelRunner:
                 "block_tables": input_metadata.block_tables,
                 "use_cuda_graph": input_metadata.use_cuda_graph,
                 "selected_token_indices":
-                sampling_metadata.selected_token_indices,
+                    sampling_metadata.selected_token_indices,
             }
             broadcast_tensor_dict(metadata_dict,
                                   src=lead_worker_rank,
@@ -510,7 +490,10 @@ class ModelRunner:
             kv_caches=kv_caches,
             input_metadata=input_metadata,
         )
-        debug_pront_3(f"model_executable() took {((time.perf_counter() - start_time) * 1000):.2f} ms")
+        debug_pront_3(
+            f"model_executable() with {input_tokens.shape = } and {len(kv_caches) = } took "
+            f"{((time.perf_counter() - start_time) * 1000):.2f} ms"
+        )
 
         # Sample the next token.
         start_time = time.perf_counter()
