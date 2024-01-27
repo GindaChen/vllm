@@ -13,6 +13,7 @@ from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import debug_pront, debug_pront_2, debug_pront_3
+from vllm.worker.worker_proc import WorkerProcess
 
 logger = init_logger(__name__)
 
@@ -420,7 +421,7 @@ class _AsyncLLMEngine(LLMEngine):
 
     async def _run_dist_worker_group_async(
         self,
-        worker_group: 'List[Union[RayWorkerVllm, Worker]]',
+        worker_group: 'List[Union[WorkerProcess]]',
         method: str,
         *args,
         driver_args: Optional[List[Any]] = None,
@@ -436,46 +437,14 @@ class _AsyncLLMEngine(LLMEngine):
         if driver_kwargs is None:
             driver_kwargs = kwargs
 
-        def _is_local(worker) -> bool:
-            """Returns true if the worker is a local worker (wrt the driver)."""
-            return getattr(worker, 'is_driver_worker', False)
-
-        def _execute(worker, method, *args, **kwargs):
-            """Executes the given method on the worker. Returns a handler if
-            the worker is remote, otherwise returns the output directly.
-            """
-            if _is_local(worker):
-                method = getattr(worker, method)
-                func = partial(method, *args, **kwargs)
-                coro = asyncio.get_event_loop().run_in_executor(None, func)
-                return coro
-            return worker.execute_method.remote(method, *args, **kwargs)
-
-        def _get_return_value(worker, output):
-            """Auxiliary function to get the return value of the worker."""
-            if _is_local(worker):
-                return output
-            return ray.get(output)
-
-        if max_concurrent_workers:
-            raise NotImplementedError(
-                "max_concurrent_workers is not supported yet.")
-
-        lead_worker, rest_workers = worker_group[0], worker_group[1:]
-
-        # Start the lead worker
-        lead_worker_output = _execute(lead_worker, method, *driver_args,
-                                      **driver_kwargs)
-
-        # Start the rest of the workers
-        # TODO: Is the type actually right for ray outputs?
-        #  Don't we need to use ray.get()?
-        rest_worker_outputs = [
-            _execute(worker, method, *args, **kwargs)
-            for worker in rest_workers
-        ]
-
-        coros = [lead_worker_output] + rest_worker_outputs
+        coros = []
+        for i, worker in enumerate(worker_group):
+            if i == 0:
+                coro = worker.invoke_async(method, *driver_args,
+                                           **driver_kwargs)
+            else:
+                coro = worker.invoke_async(method, *args, **kwargs)
+            coros.append(coro)
 
         all_outputs = await asyncio.gather(*coros)
         return all_outputs
