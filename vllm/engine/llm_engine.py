@@ -1099,8 +1099,9 @@ class LLMEngine:
             tasks.append(coro)
             pass
 
+
         loop = asyncio.get_event_loop()
-        coro = asyncio.gather(*tasks)
-        results = loop.run_until_complete(coro)
+        task = loop.create_task(asyncio.gather(*tasks))
+        results = loop.run_until_complete(task)
 
         return results
