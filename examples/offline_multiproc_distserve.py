@@ -176,6 +176,7 @@ if __name__ == '__main__':
         local_rank=1, rank=1,
         distributed_init_method=distributed_init_method,
     ).start_worker_loop()
+    
 
     logger.info("Worker process created. Start to setup the worker.")
     setup_workers([prefill_worker, decode_worker])
