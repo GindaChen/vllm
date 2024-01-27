@@ -143,10 +143,10 @@ class CacheEngine:
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
         start_time = time.time()
-        debug_pront_3(f"Sending blocks {block_ids = } to {rank = }")
+        debug_pront_3(f"Sending blocks {len(block_ids) = } to {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
-                debug_pront(f"Sending block: {block_id} from layer {i}")
+                debug_pront_3(f"Sending block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.isend(a, dst=rank)
@@ -158,29 +158,31 @@ class CacheEngine:
         end_time = time.time()
         duration = end_time - start_time
         duration *= 1000
-        debug_pront_3(f"Done sending blocks {block_ids = } to {rank = } in {duration} ms")
+        debug_pront_3(f"Done sending blocks {len(block_ids) = } to {rank = } in {duration} ms")
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
         start_time = time.time()
-        debug_pront_3(f"Receiving blocks {block_ids = } from {rank = }")
+        # debug_pront_3(f"Receiving blocks {block_ids = } from {rank = }")
+        debug_pront_3(f"Receiving blocks {len(block_ids) = } from {rank = }")
         for block_id in block_ids:
             for i in range(self.num_layers):
-                debug_pront(f"Receiving block: {block_id} from layer {i}")
+                debug_pront_3(f"Receiving block: {block_id} from layer {i}")
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.irecv(a, src=rank)
                     tasks.append(x)
                 pass
         for i, task in enumerate(tasks):
-            debug_pront(f"Waiting for task: {i}")
+            debug_pront_3(f"Waiting for task: {i}")
             task.wait()
+            debug_pront_3(f"Finish waiting for task: {i}")
         end_time = time.time()
         duration = end_time - start_time
         duration *= 1000
-        debug_pront_3(f"Done receiving blocks {block_ids = } from {rank = } in {duration} ms")
+        debug_pront_3(f"Done receiving blocks {len(block_ids) = } from {rank = } in {duration} ms")
         return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
