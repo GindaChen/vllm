@@ -22,6 +22,7 @@ from vllm.sequence import (SamplerOutput, Sequence, SequenceGroup,
 from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                get_tokenizer)
 from vllm.utils import Counter, set_cuda_visible_devices, get_ip, get_open_port, get_distributed_init_method
+from vllm.worker.worker_proc import WorkerProcess
 
 if ray:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -67,7 +68,6 @@ class LLMEngine:
         cache_config: CacheConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
-        placement_group: Optional["PlacementGroup"],
         log_stats: bool,
     ) -> None:
         logger.info(
@@ -105,11 +105,7 @@ class LLMEngine:
 
         # Create the parallel GPU workers.
         if self.parallel_config.worker_use_ray:
-            # Disable Ray usage stats collection.
-            ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
-            if ray_usage != "1":
-                os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
-            self._init_workers_ray(placement_group)
+            self._init_workers_multiproc()
         else:
             self._init_workers()
 
@@ -144,6 +140,50 @@ class LLMEngine:
         self.pending_futures: Set[Coroutine] = set()
         self.iteration_counter = 0
         self.event_logging = {}  # (start_time, end_time, duration, task_name)
+
+    def _init_workers_multiproc(self):
+        from vllm.worker.worker import Worker
+        distributed_init_method = get_distributed_init_method(
+            get_ip(), get_open_port())
+
+        # Construct the workers
+        num_gpus = 1
+        self.workers: List[WorkerProcess] = []
+        pp_size = self.parallel_config.pipeline_parallel_size
+        tp_size = self.parallel_config.tensor_parallel_size
+        for pp_rank in range(pp_size):
+            for tp_rank in range(tp_size):
+                rank = pp_rank * tp_size + tp_rank
+                worker = WorkerProcess(
+                    local_rank=rank,
+                    rank=rank,
+                    distributed_init_method=distributed_init_method,
+                    model_config=self.model_config,
+                    parallel_config=self.parallel_config,
+                    scheduler_config=self.scheduler_config,
+                    lora_config=self.cache_config,
+                )
+                worker.start_worker_loop()
+                if pp_rank == 0 and tp_rank == 0:
+                    self.driver_worker = worker
+                else:
+                    self.workers.append(worker)
+
+        logger.info(f"Running init_model.")
+
+        self._run_worker_group([self.driver_worker] + self.workers,
+                               "init_model")
+
+        logger.info(f"Running load_model.")
+        self._run_worker_group(
+            [self.driver_worker] + self.workers,
+            "load_model",
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
+        )
+
+        logger.info(f"Finished Ray worker initialization.")
+        return
 
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
@@ -359,7 +399,6 @@ class LLMEngine:
         placement_group = initialize_cluster(parallel_config)
         # Create the LLM engine.
         engine = cls(*engine_configs,
-                     placement_group,
                      log_stats=not engine_args.disable_log_stats)
         return engine
 
@@ -1034,7 +1073,7 @@ class LLMEngine:
 
     def _run_worker_group(
         self,
-        worker_group: 'List[Union[RayWorkerVllm, Worker]]',
+        worker_group: 'List[Union[WorkerProcess]]',
         method: str,
         *args,
         driver_args: Optional[List[Any]] = None,
@@ -1050,60 +1089,17 @@ class LLMEngine:
         driver_args = driver_args if driver_args is not None else args
         driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
 
-        def _is_local(worker) -> bool:
-            """Returns true if the worker is a local worker (wrt the driver)."""
-            return getattr(worker, 'is_driver_worker', False)
-
-        def _execute(worker, method, *args, **kwargs):
-            """Executes the given method on the worker. Returns a handler if
-            the worker is remote, otherwise returns the output directly.
-            """
-            if _is_local(worker):
-                return getattr(worker, method)(*args, **kwargs)
-            return worker.execute_method.remote(method, *args, **kwargs)
-
-        def _get_return_value(worker, output):
-            """Auxiliary function to get the return value of the worker."""
-            if _is_local(worker):
-                return output
-            return ray.get(output)
-
-        if max_concurrent_workers:
-            raise NotImplementedError(
-                "max_concurrent_workers is not supported yet.")
-
-        lead_worker, rest_workers = worker_group[0], worker_group[1:]
-
-        # Start the rest of the workers first.
-        rest_worker_outputs = [
-            _execute(worker, method, *args, **kwargs)
-            for worker in rest_workers
-        ]
-
-        # Start the lead worker after all the ray workers.
-        lead_worker_output = _execute(lead_worker, method, *driver_args,
-                                      **driver_kwargs)
-
-        # Return the results.
-        outputs = [lead_worker_output] + rest_worker_outputs
-        # result = [_get_return_value(worker, output) for worker, output in zip(worker_group, outputs)]
-        # return result
-
-        result = []
-        # FIXME: (HACK) Print detailed exception if happens (for debugging)
-        has_error = False
-        for worker_id, (worker,
-                        output) in enumerate(zip(worker_group, outputs)):
-            try:
-                r = _get_return_value(worker, output)
-                result.append(r)
-            except Exception as e:
-                logger.error(f"Ray worker {worker_id} failed with error: {e}")
-                traceback.print_exc()
-                has_error = True
-                pass
+        tasks = []
+        for i, worker in enumerate(worker_group):
+            if i == 0:
+                coro = worker.invoke_async(method, *driver_args,
+                                           **driver_kwargs)
+            else:
+                coro = worker.invoke_async(method, *args, **kwargs)
+            tasks.append(coro)
             pass
-        if has_error:
-            raise Exception(
-                f"At execution of {method}, at least one worker failed.")
+
+        main_loop = asyncio.get_event_loop()
+        result = main_loop.run_until_complete(asyncio.gather(*tasks))
+
         return result

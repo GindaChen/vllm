@@ -487,7 +487,8 @@ class ModelRunner:
         debug_pront_3(
             f"Worker with {rank = } Inside execute_model({len(seq_group_metadata_list)=}, {len(kv_caches)=}, {lead_worker_rank=}, {group=})"
         )
-        debug_pront_3(f"Executing the model with {len(seq_group_metadata_list)}")
+        debug_pront_3(
+            f"Executing the model with {len(seq_group_metadata_list)}")
         start_time = time.perf_counter()
         input_tokens, input_positions, input_metadata, sampling_metadata = (
             self.prepare_input_tensors(
@@ -495,7 +496,9 @@ class ModelRunner:
                 lead_worker_rank=lead_worker_rank,
                 group=group,
             ))
-        debug_pront_3(f"prepare_input_tensors() took {((time.perf_counter() - start_time) * 1000):.2f} ms")
+        debug_pront_3(
+            f"prepare_input_tensors() took {((time.perf_counter() - start_time) * 1000):.2f} ms"
+        )
 
         start_time = time.perf_counter()
         # Execute the model.
@@ -510,7 +513,9 @@ class ModelRunner:
             kv_caches=kv_caches,
             input_metadata=input_metadata,
         )
-        debug_pront_3(f"model_executable() took {((time.perf_counter() - start_time) * 1000):.2f} ms")
+        debug_pront_3(
+            f"model_executable() took {((time.perf_counter() - start_time) * 1000):.2f} ms"
+        )
 
         # Sample the next token.
         start_time = time.perf_counter()
@@ -518,7 +523,9 @@ class ModelRunner:
             hidden_states=hidden_states,
             sampling_metadata=sampling_metadata,
         )
-        debug_pront_3(f"model.sample() took {((time.perf_counter() - start_time) * 1000):.2f} ms")
+        debug_pront_3(
+            f"model.sample() took {((time.perf_counter() - start_time) * 1000):.2f} ms"
+        )
         return output
 
     @torch.inference_mode()
