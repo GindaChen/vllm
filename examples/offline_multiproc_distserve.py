@@ -136,9 +136,11 @@ class WorkerProcess:
         return result
 
     def kill(self):
+        logger.info(f"[Worker({self.rank})] Killing the worker...")
         _none = (None, None, None)
         self.task_queue.put(_none)
         self.proc.join()
+        logger.info(f"[Worker({self.rank})] Worker killed.")
         return
 
 
@@ -178,3 +180,4 @@ if __name__ == '__main__':
     logger.info("Worker process created. Start to setup the worker.")
     setup_workers([prefill_worker, decode_worker])
     prefill_worker.kill()
+    decode_worker.kill()
