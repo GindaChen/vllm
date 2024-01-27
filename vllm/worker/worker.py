@@ -200,8 +200,6 @@ class Worker:
             self.cache_engine.send_blocks(send_blocks)
         else:
             self.cache_engine.recv_blocks(recv_blocks)
-
-        torch.cuda.synchronize()
         return
 
     # FIXME: (hack) SHOULD NOT BE IN MASTER!

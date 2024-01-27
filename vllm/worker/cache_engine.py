@@ -148,12 +148,12 @@ class CacheEngine:
                 for j in [0, 1]:
                     a = self.gpu_cache[i][j][block_id]
                     x = torch.distributed.isend(a, dst=rank)
-                    tasks.append(x)
-                pass
-        for task in tasks:
-            debug_pront(f"Waiting for task: {task}")
-            task.wait()
-        debug_pront(f"Done sending blocks {block_ids = } to {rank = }")
+        #             tasks.append(x)
+        #         pass
+        # for task in tasks:
+        #     debug_pront(f"Waiting for task: {task}")
+        #     task.wait()
+        # debug_pront(f"Done sending blocks {block_ids = } to {rank = }")
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
