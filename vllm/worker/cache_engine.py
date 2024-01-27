@@ -161,7 +161,9 @@ class CacheEngine:
         duration = end_time - start_time
         duration *= 1000
         total_size = human_readable_size(total_size)
-        debug_pront_3(f"Done sending blocks {len(block_ids) = } ({total_size = }) to {rank = } in {duration} ms")
+        debug_pront_3(
+            f"Done sending blocks {len(block_ids) = } ({total_size = }) to {rank = } in {duration} ms"
+        )
         return
 
     def recv_blocks(self, block_ids: List[int]) -> None:
@@ -184,13 +186,17 @@ class CacheEngine:
         duration = end_time - start_time
         duration *= 1000
         total_size = human_readable_size(total_size)
-        debug_pront_3(f"Done receiving (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms")
+        debug_pront_3(
+            f"Done receiving (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms"
+        )
         for i, task in enumerate(tasks):
             task.wait()
         end_time = time.time()
         duration = end_time - start_time
         duration *= 1000
-        debug_pront_3(f"Done waiting (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms")
+        debug_pront_3(
+            f"Done waiting (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms"
+        )
         return
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:

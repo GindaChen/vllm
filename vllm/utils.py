@@ -126,13 +126,13 @@ def human_readable_size(size_in_bytes):
     """
     if size_in_bytes < 1024:
         return f"{size_in_bytes} B"
-    elif size_in_bytes < 1024 ** 2:
+    elif size_in_bytes < 1024**2:
         return f"{size_in_bytes / 1024:.2f} KB"
-    elif size_in_bytes < 1024 ** 3:
+    elif size_in_bytes < 1024**3:
         return f"{size_in_bytes / 1024 ** 2:.2f} MB"
-    elif size_in_bytes < 1024 ** 4:
+    elif size_in_bytes < 1024**4:
         return f"{size_in_bytes / 1024 ** 3:.2f} GB"
-    elif size_in_bytes < 1024 ** 5:
+    elif size_in_bytes < 1024**5:
         return f"{size_in_bytes / 1024 ** 4:.2f} TB"
     else:
         return f"{size_in_bytes / 1024 ** 5:.2f} PB"

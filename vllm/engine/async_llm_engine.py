@@ -80,7 +80,7 @@ class RequestTracker:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
         self._new_requests: asyncio.Queue[Tuple[AsyncStream,
-        dict]] = asyncio.Queue()
+                                                dict]] = asyncio.Queue()
         self.new_requests_event = None
 
     def __contains__(self, item):
@@ -139,7 +139,7 @@ class RequestTracker:
         self._finished_requests.put_nowait(request_id)
 
         if request_id not in self._request_streams or self._request_streams[
-            request_id].finished:
+                request_id].finished:
             # The request has already finished or been aborted.
             return
 
@@ -630,7 +630,7 @@ class AsyncLLMEngine:
                     shortened_prompt = shortened_prompt[:self.max_log_len]
                 if shortened_token_ids is not None:
                     shortened_token_ids = shortened_token_ids[:self.
-                    max_log_len]
+                                                              max_log_len]
             # logger.info(f"Received request {request_id}: "
             #             f"prompt: {shortened_prompt!r}, "
             #             f"prefix_pos: {prefix_pos},"
