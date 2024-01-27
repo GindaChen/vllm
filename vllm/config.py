@@ -262,6 +262,8 @@ class ModelConfig:
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
+        if parallel_config.is_dist_serve:
+            return total_num_hidden_layers
         return total_num_hidden_layers // parallel_config.pipeline_parallel_size
 
 
@@ -334,11 +336,13 @@ class ParallelConfig:
         tensor_parallel_size: int,
         worker_use_ray: bool,
         max_parallel_loading_workers: Optional[int] = None,
+        is_dist_serve:bool=False
     ) -> None:
         self.pipeline_parallel_size = pipeline_parallel_size
         self.tensor_parallel_size = tensor_parallel_size
         self.worker_use_ray = worker_use_ray
         self.max_parallel_loading_workers = max_parallel_loading_workers
+        self.is_dist_serve = is_dist_serve
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
         if self.world_size > 1:

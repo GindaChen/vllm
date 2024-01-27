@@ -144,15 +144,14 @@ class WorkerProcess:
 
 def setup_workers(workers: List[WorkerProcess]):
     async def _setup_comm(worker):
-        worker.invoke("init_model")
+        await worker.invoke_async("init_model")
 
     async def _setup_worker(worker):
-
-        worker.invoke("load_model")
+        await worker.invoke_async("load_model")
         cache_config.num_gpu_blocks = 10000
         cache_config.num_cpu_blocks = 10000
-        worker.invoke("init_cache_engine", cache_config)
-        worker.invoke("warm_up_model")
+        await worker.invoke_async("init_cache_engine", cache_config)
+        await worker.invoke_async("warm_up_model")
         return
 
     main_loop = asyncio.get_event_loop()
@@ -165,6 +164,7 @@ if __name__ == '__main__':
     logger.info("Creating a worker process...")
     parallel_config.pipeline_parallel_size = 2
     parallel_config.world_size = 2
+    parallel_config.is_dist_serve = True
 
     prefill_worker = WorkerProcess(
         local_rank=0, rank=0,
