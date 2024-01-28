@@ -74,6 +74,20 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "gather_cached_kv",
     &gather_cached_kv,
     "Gather key and value from the cache into contiguous QKV tensors");
+  cache_ops.def(
+    "get_ipc_mem_handle",
+    &get_ipc_mem_handle,
+    "Get IPC Memory handler for the KV caches");
+  cache_ops.def(
+    "register_ipc_mem_handle",
+    &register_ipc_mem_handle,
+    "Register memory handler for the KV caches");
+  cache_ops.def(
+    "migrate_blocks",
+    &migrate_blocks,
+    "Migrate KV cache blocks");
+
+
 
   // Cuda utils
   pybind11::module cuda_utils = m.def_submodule("cuda_utils", "vLLM cuda utils");
