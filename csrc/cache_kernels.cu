@@ -7,7 +7,7 @@
 
 #include <cstdio>
 #include <cuda_runtime_api.h>
-
+#include <cassert>
 
 #include <algorithm>
 #include <cassert>
@@ -396,6 +396,31 @@ void gather_cached_kv(
     });
 }
 
+
+// Block Migration Code
+
+/*
+assert_whenever: assertion which ignore whether NDEBUG is set
+
+In C++, assert() is evaluated only when NDEBUG is not set. This is
+inconvenient when we want to check the assertion even in release mode.
+This macro is a workaround for this problem.
+*/
+
+extern "C" {
+// Copied from assert.h
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__));
+
+#define __ASSERT_FUNCTION	__extension__ __PRETTY_FUNCTION__
+#  define assert_whenever(expr)							\
+     (static_cast <bool> (expr)						\
+      ? void (0)							\
+      : __assert_fail (#expr, __FILE__, __LINE__, __ASSERT_FUNCTION))
+}
+
+
 static std::vector<int64_t> cudaIpcMemHandle2Bytes(const cudaIpcMemHandle_t &handle) {
 	std::vector<int64_t> result;
 	for (size_t i = 0; i < sizeof(handle); ++i) {
@@ -414,15 +439,7 @@ static cudaIpcMemHandle_t bytes2CudaIpcMemHandle(const std::vector<int64_t> &byt
 }
 
 
-#define CUDA_CHECK(status)                                              \
-  {                                                                     \
-    cudaError_t error = status;                                         \
-    if (error != cudaSuccess) {                                         \
-      std::cerr << "Got bad cuda status: " << cudaGetErrorString(error) \
-                << " at line: " << __LINE__ << std::endl;               \
-      exit(EXIT_FAILURE);                                               \
-    }                                                                   \
-  }
+
 
 /*
 get_ipc_mem_handle: Get the IPC memory handle of a tensor
