@@ -1,4 +1,5 @@
 """CacheEngine class for managing the KV cache."""
+import random
 import time
 from typing import Dict, List, Tuple
 
@@ -142,7 +143,7 @@ class CacheEngine:
     def send_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_next_rank()
-        start_time = time.time()
+        start_time = time.perf_counter()
         debug_pront_3(f"Sending blocks {len(block_ids) = } to {rank = }")
         total_size = 0
         for block_id in block_ids:
@@ -157,7 +158,7 @@ class CacheEngine:
         # for task in tasks:
         #     debug_pront(f"Waiting for task: {task}")
         #     task.wait()
-        end_time = time.time()
+        end_time = time.perf_counter()
         duration = end_time - start_time
         duration *= 1000
         total_size = human_readable_size(total_size)
@@ -169,7 +170,7 @@ class CacheEngine:
     def recv_blocks(self, block_ids: List[int]) -> None:
         tasks = []
         rank = get_pipeline_model_parallel_prev_rank()
-        start_time = time.time()
+        start_time = time.perf_counter()
         # debug_pront_3(f"Receiving blocks {block_ids = } from {rank = }")
         debug_pront_3(f"Receiving blocks {len(block_ids) = } from {rank = }")
         total_size = 0
@@ -182,7 +183,7 @@ class CacheEngine:
                     total_size += tensor_size_in_bytes(a)
                     tasks.append(x)
                 pass
-        end_time = time.time()
+        end_time = time.perf_counter()
         duration = end_time - start_time
         duration *= 1000
         total_size = human_readable_size(total_size)
