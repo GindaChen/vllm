@@ -569,7 +569,7 @@ void migrate_blocks(
     const std::vector<int64_t> &decoding_block_indexes,
 
     std::vector<torch::Tensor> &k_cache,
-    std::vector<torch::Tensor> &v_cache,
+    std::vector<torch::Tensor> &v_cache
 )
 {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
