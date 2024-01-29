@@ -574,6 +574,7 @@ void migrate_blocks(
 {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const int64_t dtype_size = k_cache[0].dtype().itemsize();
+    const int64_t head_size_by_x = head_size / x;
     // for all layers
     for (int64_t layer_id = 0; layer_id < num_layers; layer_id++)
     {
@@ -592,30 +593,27 @@ void migrate_blocks(
             const int64_t context_worker_hash = decode_rank; // FIXME: just for now...
 
             // Do the migration for K cache
-            // key_block_shape = (num_gpu_blocks, num_heads, head_size, block_size, x)
+            // key_block_shape = (num_gpu_blocks, num_heads, head_size_by_x, block_size, x)
             {
 
                 char* decoding_worker_base_ptr = (char*) k_cache[layer_id].data_ptr();
                 char* context_worker_base_ptr = (char*) context_worker_k_cache_addr[layer_id][context_worker_hash];
 
+                // dim: num_gpu_blocks, num_heads, head_size // x, block_size, x
                 decoding_worker_base_ptr += INDEX_5D(
-                    // dim: num_gpu_blocks, num_heads, head_size, block_size, x
-                    num_gpu_blocks, num_heads, head_size, block_size, x,
-                    // offsets:
+                    num_gpu_blocks, num_heads, head_size_by_x, block_size, x,
                     decoding_block_index, 0, 0, 0, 0
                 ) * dtype_size;
 
                 context_worker_base_ptr += INDEX_5D(
-                    // dim: num_gpu_blocks, num_heads, head_size, block_size, x
-                    num_gpu_blocks, num_heads, head_size, block_size, x,
-                    // offsets:
+                    num_gpu_blocks, num_heads, head_size_by_x, block_size, x,
                     context_block_index, 0, 0, 0, 0
                 ) * dtype_size;
 
                 CUDA_CHECK(cudaMemcpyAsync(
                     decoding_worker_base_ptr,
                     context_worker_base_ptr,
-                    num_heads * head_size * block_size * x * dtype_size,
+                    (num_heads * head_size_by_x * block_size * x) * dtype_size,
                     cudaMemcpyDeviceToDevice,
                     stream
                 ));
@@ -647,7 +645,7 @@ void migrate_blocks(
                 CUDA_CHECK(cudaMemcpyAsync(
                     decoding_worker_base_ptr,
                     context_worker_base_ptr,
-                    num_heads * head_size * block_size * dtype_size,
+                    (num_heads * head_size * block_size) * dtype_size,
                     cudaMemcpyDeviceToDevice,
                     stream
                 ));
