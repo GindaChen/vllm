@@ -203,23 +203,25 @@ class CacheEngine:
     def retrieve_blocks(self, src_block_ids: List[int],
                         dst_block_ids: List[int]):
         """Retrieve the blocks from the another GPU (that has exposed memory handler for me)."""
-        context_tp_size = decoding_tp_size = self.parallel_config.tensor_parallel_size
+        # context_tp_size = decoding_tp_size = self.parallel_config.tensor_parallel_size
         decoding_tp_rank = get_tensor_model_parallel_rank()
         decoding_worker_k_caches = [k for k, v in self.gpu_cache]
         decoding_worker_v_caches = [v for k, v in self.gpu_cache]
 
         # Call the kernel
+        x = 16 // torch.tensor([], dtype=self.dtype).element_size()
         cache_ops.migrate_blocks(
-            1,  # const int64_t context_pp_size,
-            context_tp_size,  # const int64_t context_tp_size,
-            src_block_ids,  # std::vector<torch::Tensor>& context_worker_k_caches,
-            1,  # const int64_t decoding_pp_size,
-            decoding_tp_size,  # const int64_t decoding_tp_size,
-            0,  # const int64_t decoding_pp_rank,
-            decoding_tp_rank,  # const int64_t decoding_tp_rank,
-            dst_block_ids,  # const std::vector<int64_t> &decoding_block_indexes,
-            decoding_worker_k_caches,  # std::vector<torch::Tensor>& decoding_worker_v_caches
-            decoding_worker_v_caches,  # std::vector<torch::Tensor>& decoding_worker_v_caches
+            self.num_layers,
+            self.num_gpu_blocks,
+            self.num_heads,
+            self.head_size,
+            self.block_size,
+            x,
+            decoding_tp_rank,
+            src_block_ids,
+            dst_block_ids,
+            decoding_worker_k_caches,
+            decoding_worker_v_caches,
         )
         return
 

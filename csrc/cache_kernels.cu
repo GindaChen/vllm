@@ -557,145 +557,110 @@ stream indicated by at::cuda::getCurrentCUDAStream(). So it is python's
 responsibility to set the current stream before calling this function.
 */
 void migrate_blocks(
-	// Parallelism parameters for the context stage engine
-	const int64_t context_pp_size,
-	const int64_t context_tp_size,
+    const int64_t num_layers,
+    const int64_t num_gpu_blocks,
+    const int64_t num_heads,
+    const int64_t head_size,
+    const int64_t block_size,
+    const int64_t x, // x = 16 // element_size
+    const int64_t decode_rank,
 
-	// Block indexes of the context stage engine
-	const std::vector<int64_t> &context_block_indexes,
+    const std::vector<int64_t> &context_block_indexes,
+    const std::vector<int64_t> &decoding_block_indexes,
 
-	// Parallelism parameters for the decoding stage engine
-	const int64_t decoding_pp_size,
-	const int64_t decoding_tp_size,
-
-	// Rank of the decoding stage worker that calls this function
-	const int64_t decoding_pp_rank,
-	const int64_t decoding_tp_rank,
-
-	// Block indexes of the decoding stage engine
-	const std::vector<int64_t> &decoding_block_indexes,
-
-	// The decoding stage worker's KV cache
-	//      K.shape = (num_blocks, num_heads, head_size // x, block_size, x)
-    //      V.shape = (num_blocks, num_heads, head_size, block_size, x)
-    // where
-    //      element_size = dtype.itemsize
-    //      x = 16 // element_size
-	std::vector<torch::Tensor>& decoding_worker_k_caches,
-	std::vector<torch::Tensor>& decoding_worker_v_caches
-) {
+    std::vector<torch::Tensor> &k_cache,
+    std::vector<torch::Tensor> &v_cache,
+)
+{
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    //
-    // Calculate dimensions of the KV cache blocks
-    //
-    // element_size = dtype.itemsize
-    // x = 16 // element_size
-    // K: (num_blocks, num_heads, head_size // x, block_size, x)
-    // V: (num_blocks, num_heads, head_size, block_size, x)
-
-    // FIXME: Assume the mapping is one-to-one.
-    //     This means Prefill(i) -> Decode(i),
-    //     and don't think about cases such as Prefill(i) -> Decode(j) where i != j.
-
-
-    // Copy K cache from prefill to decode.
+    const int64_t dtype_size = k_cache[0].dtype().itemsize();
+    // for all layers
+    for (int64_t layer_id = 0; layer_id < num_layers; layer_id++)
     {
-        const int64_t num_layers = decoding_block_indexes.size();
+        // assert len(context_block_indexes) == len(decoding_block_indexes)
+        assert_whenever(context_block_indexes.size() == decoding_block_indexes.size());
 
-        const int64_t num_blocks = decoding_worker_k_caches[0].size(0);
-        const int64_t num_heads = decoding_worker_k_caches[0].size(1);
-        const int64_t head_size_by_x = decoding_worker_k_caches[0].size(2);
-        const int64_t block_size = decoding_worker_k_caches[0].size(3);
-        const int64_t x = decoding_worker_k_caches[0].size(4);
+        // for each pair of context,decoding blocks
+        for (int64_t block_id = 0; block_id < context_block_indexes.size(); block_id++)
+        {
+            // get the context block index
+            int64_t context_block_index = context_block_indexes[block_id];
+            // get the decoding block index
+            int64_t decoding_block_index = decoding_block_indexes[block_id];
 
-        for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
-            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
-                const int64_t context_block_index = context_block_indexes[block_id];
-                const int64_t decoding_block_index = decoding_block_indexes[block_id];
+            // const int64_t context_worker_hash = (context_pp_rank<<6) + context_tp_rank;
+            const int64_t context_worker_hash = decode_rank; // FIXME: just for now...
 
-                const int64_t context_pp_rank = 0; // assume no PP for context
-                const int64_t context_tp_rank = decoding_tp_rank; // assume one-to-one mapping
-                const int64_t context_worker_hash = (context_pp_rank << PP_RANK_SHIFT) + context_tp_rank;
-                const int64_t decoding_worker_hash = (decoding_pp_rank << PP_RANK_SHIFT) + decoding_tp_rank;
+            // Do the migration for K cache
+            // key_block_shape = (num_gpu_blocks, num_heads, head_size, block_size, x)
+            {
 
-                char* context_worker_base_ptr = (char*) context_worker_k_cache_addr[num_layers][context_worker_hash];
-                char* decoding_worker_base_ptr = (char*) decoding_worker_k_caches[num_layers].data_ptr();
+                char* decoding_worker_base_ptr = (char*) k_cache[layer_id].data_ptr();
+                char* context_worker_base_ptr = (char*) context_worker_k_cache_addr[layer_id][context_worker_hash];
 
-
-
-                // dim: (num_blocks, num_heads, head_size // x, block_size, x)
-                context_worker_base_ptr += INDEX_5D(
-                    num_blocks, num_heads, head_size_by_x, block_size, x,
-                    context_block_index, 0, 0, 0, 0
-                );
                 decoding_worker_base_ptr += INDEX_5D(
-                    num_blocks, num_heads, head_size_by_x, block_size, x,
+                    // dim: num_gpu_blocks, num_heads, head_size, block_size, x
+                    num_gpu_blocks, num_heads, head_size, block_size, x,
+                    // offsets:
                     decoding_block_index, 0, 0, 0, 0
-                );
+                ) * dtype_size;
 
-                const size_t bytes_to_copy = num_heads * head_size_by_x * block_size * x;
+                context_worker_base_ptr += INDEX_5D(
+                    // dim: num_gpu_blocks, num_heads, head_size, block_size, x
+                    num_gpu_blocks, num_heads, head_size, block_size, x,
+                    // offsets:
+                    context_block_index, 0, 0, 0, 0
+                ) * dtype_size;
 
                 CUDA_CHECK(cudaMemcpyAsync(
                     decoding_worker_base_ptr,
                     context_worker_base_ptr,
-                    bytes_to_copy,
+                    num_heads * head_size * block_size * x * dtype_size,
                     cudaMemcpyDeviceToDevice,
                     stream
                 ));
+
+
             }
-        }
-    }
 
 
-    // Copy V cache from prefill to decode.
-    // (Duplicate most code for readability)
-    {
-        const int64_t num_layers = decoding_block_indexes.size();
+            // Do the migration for V cache
+            // value_block_shape = (num_gpu_blocks, num_heads, head_size, block_size)
+            {
+                char* decoding_worker_base_ptr = (char*) v_cache[layer_id].data_ptr();
+                char* context_worker_base_ptr = (char*) context_worker_v_cache_addr[layer_id][context_worker_hash];
 
-        const int64_t num_blocks = decoding_worker_k_caches[0].size(0);
-        const int64_t num_heads = decoding_worker_k_caches[0].size(1);
-        const int64_t head_size = decoding_worker_k_caches[0].size(2);
-        const int64_t block_size = decoding_worker_k_caches[0].size(3);
-
-        for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
-            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
-                const int64_t context_block_index = context_block_indexes[block_id];
-                const int64_t decoding_block_index = decoding_block_indexes[block_id];
-
-                const int64_t context_pp_rank = 0; // assume no PP for context
-                const int64_t context_tp_rank = decoding_tp_rank; // assume one-to-one mapping
-                const int64_t context_worker_hash = (context_pp_rank << PP_RANK_SHIFT) + context_tp_rank;
-                const int64_t decoding_worker_hash = (decoding_pp_rank << PP_RANK_SHIFT) + decoding_tp_rank;
-
-                char* context_worker_base_ptr = (char*) context_worker_v_cache_addr[num_layers][context_worker_hash];
-                char* decoding_worker_base_ptr = (char*) decoding_worker_v_caches[num_layers].data_ptr();
-
-
-                // dim: (num_blocks, num_heads, head_size, block_size)
-                context_worker_base_ptr += INDEX_4D(
-                    num_blocks, num_heads, head_size, block_size,
-                    context_block_index, 0, 0, 0
-                );
                 decoding_worker_base_ptr += INDEX_4D(
-                    num_blocks, num_heads, head_size, block_size,
-                    decoding_block_index, 0, 0, 0
-                );
+                    // dim: num_gpu_blocks, num_heads, head_size, block_size,
+                    num_gpu_blocks, num_heads, head_size, block_size,
+                    // offsets:
+                    context_block_index, 0, 0, 0
+                ) * dtype_size;
 
-                const size_t bytes_to_copy = num_heads * head_size * block_size;
+                context_worker_base_ptr += INDEX_4D(
+                    // dim: num_gpu_blocks, num_heads, head_size, block_size,
+                    num_gpu_blocks, num_heads, head_size, block_size,
+                    // offsets:
+                    decoding_block_index, 0, 0, 0
+                ) * dtype_size;
 
                 CUDA_CHECK(cudaMemcpyAsync(
                     decoding_worker_base_ptr,
                     context_worker_base_ptr,
-                    bytes_to_copy,
+                    num_heads * head_size * block_size * dtype_size,
                     cudaMemcpyDeviceToDevice,
                     stream
                 ));
             }
         }
-    }
-    return ;
 
+
+    }
 }
+
+
+
+
 
 /*
 migrate_blocks__block_contiguous: Migrate blocks from the context stage engine to the decoding stage engine

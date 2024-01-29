@@ -42,21 +42,19 @@ bool register_ipc_mem_handle(
 );
 
 void migrate_blocks(
-	const int64_t context_pp_size,
-	const int64_t context_tp_size,
+	const int64_t num_layers,
+    const int64_t num_gpu_blocks,
+    const int64_t num_heads,
+    const int64_t head_size,
+    const int64_t block_size,
+    const int64_t x, // (x = 16 // element_size)
+    const int64_t decode_rank,
 
-	const std::vector<int64_t> &context_block_indexes,
+    const std::vector<int64_t> &context_block_indexes,
+    const std::vector<int64_t> &decoding_block_indexes,
 
-	const int64_t decoding_pp_size,
-	const int64_t decoding_tp_size,
-
-	const int64_t decoding_pp_rank,
-	const int64_t decoding_tp_rank,
-
-	const std::vector<int64_t> &decoding_block_indexes,
-
-	std::vector<torch::Tensor>& decoding_worker_k_caches,
-	std::vector<torch::Tensor>& decoding_worker_v_caches
+    std::vector<torch::Tensor> &k_cache,
+    std::vector<torch::Tensor> &v_cache,
 );
 
 void migrate_blocks__block_contiguous(
