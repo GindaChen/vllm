@@ -34,6 +34,7 @@ std::vector<int64_t> get_ipc_mem_handle(torch::Tensor tensor);
 bool register_ipc_mem_handle(
 	std::vector<int64_t> k_cache_handle_vec,
 	std::vector<int64_t> v_cache_handle_vec,
+    int64_t layer_id,
 	int64_t num_layers,
 	int64_t num_heads,
 	const std::vector<int64_t> &context_parallel_config,
