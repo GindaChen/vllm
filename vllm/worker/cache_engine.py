@@ -9,7 +9,7 @@ from vllm._C import cache_ops
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.model_executor.parallel_utils.parallel_state import get_pipeline_model_parallel_next_rank, \
-    get_pipeline_model_parallel_prev_rank
+    get_pipeline_model_parallel_prev_rank, get_tensor_model_parallel_rank
 from vllm.utils import in_wsl, debug_pront, debug_pront_3, tensor_size_in_bytes, human_readable_size
 
 logger = init_logger(__name__)
@@ -197,6 +197,29 @@ class CacheEngine:
         duration *= 1000
         debug_pront_3(
             f"Done waiting (irecv) blocks {len(block_ids) = } ({total_size = }) from {rank = } in {duration} ms"
+        )
+        return
+
+    def retrieve_blocks(self, src_block_ids: List[int],
+                        dst_block_ids: List[int]):
+        """Retrieve the blocks from the another GPU (that has exposed memory handler for me)."""
+        context_tp_size = decoding_tp_size = self.parallel_config.tensor_parallel_size
+        decoding_tp_rank = get_tensor_model_parallel_rank()
+        decoding_worker_k_caches = [k for k, v in self.gpu_cache]
+        decoding_worker_v_caches = [v for k, v in self.gpu_cache]
+
+        # Call the kernel
+        cache_ops.migrate_blocks(
+            1,  # const int64_t context_pp_size,
+            context_tp_size,  # const int64_t context_tp_size,
+            src_block_ids,  # std::vector<torch::Tensor>& context_worker_k_caches,
+            1,  # const int64_t decoding_pp_size,
+            decoding_tp_size,  # const int64_t decoding_tp_size,
+            0,  # const int64_t decoding_pp_rank,
+            decoding_tp_rank,  # const int64_t decoding_tp_rank,
+            dst_block_ids,  # const std::vector<int64_t> &decoding_block_indexes,
+            decoding_worker_k_caches,  # std::vector<torch::Tensor>& decoding_worker_v_caches
+            decoding_worker_v_caches,  # std::vector<torch::Tensor>& decoding_worker_v_caches
         )
         return
 

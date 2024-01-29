@@ -345,9 +345,35 @@ class LLMEngine:
 
         # Initialize the cache.
         self._run_workers("init_cache_engine", cache_config=self.cache_config)
+
+        # Register memory handler.
+        if self.parallel_config.is_disaggregate:
+            self.setup_memory_handlers()
+
         # Warm up the model. This includes capturing the model into CUDA graph
         # if enforce_eager is False.
         self._run_workers("warm_up_model")
+
+    def setup_memory_handlers(self):
+        """(Prefill disaggregation only) Setup IPC memory handlers for prefill
+        and decode workers."""
+        # Register the GPU cache as handler, and pass it to every decode worker.
+        handlers = self._run_worker_group(self.prefill_workers,
+                                          "get_mem_handlers")
+
+        # Register the handlers to the decode workers.
+        for prefill_worker_id, handlers_in_one_worker in enumerate(handlers):
+            prefill_config = [
+                self.parallel_config.tensor_parallel_size, prefill_worker_id,
+                1, 0
+            ]  # (tp_size, tp_rank, pp_size, pp_rank)
+            self._run_worker_group(
+                self.decode_workers,
+                "register_mem_handlers",
+                handlers_in_one_worker,
+                prefill_config,
+            )
+        return
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "LLMEngine":

@@ -430,6 +430,12 @@ extern void __assert_fail (const char *__assertion, const char *__file,
     }                                                                   \
   }
 
+#define INDEX_2D(dim1, dim2, index1, index2) \
+    (((int64_t)index1) * (dim2) + (index2))
+#define INDEX_3D(dim1, dim2, dim3, index1, index2, index3) \
+    (((int64_t)index1) * (dim2) * (dim3) + ((int64_t)index2) * (dim3) + (index3))
+#define INDEX_4D(dim1, dim2, dim3, dim4, index1, index2, index3, index4) \
+    (((int64_t)index1) * (dim2) * (dim3) * (dim4) + ((int64_t)index2) * (dim3) * (dim4) + ((int64_t)index3) * (dim4) + (index4))
 #define INDEX_5D(dim1, dim2, dim3, dim4, dim5, index1, index2, index3, index4, index5) \
     (((int64_t)index1) * (dim2) * (dim3) * (dim4) * (dim5) + ((int64_t)index2) * (dim3) * (dim4) * (dim5) + ((int64_t)index3) * (dim4) * (dim5) + (index4) * (dim5) + (index5))
 
@@ -478,12 +484,16 @@ the answer is YES, register it and note down its local address.
 
 Return true if the handle is registered, false otherwise.
 */
-static constexpr int64_t MAX_PARALLEL_HASH = 4096;	// Assume there are at most 64 pp stages and 64 tp stages
-static void* context_worker_k_cache_addr[MAX_PARALLEL_HASH];
-static void* context_worker_v_cache_addr[MAX_PARALLEL_HASH];
+// FIXME: Handler holds 16 MB worth of pointers?
+static constexpr int64_t MAX_PARALLEL_HASH = 1024;	// Assume there are at most 32 pp stages and 32 tp stages
+static constexpr int64_t MAX_NUM_LAYERS = 1024;	// Assume there are at most 256 layers in the model
+static constexpr int64_t PP_RANK_SHIFT = 4;
+static void* context_worker_k_cache_addr[MAX_NUM_LAYERS][MAX_PARALLEL_HASH];
+static void* context_worker_v_cache_addr[MAX_NUM_LAYERS][MAX_PARALLEL_HASH];
 bool register_ipc_mem_handle(
 	std::vector<int64_t> k_cache_handle_vec,
 	std::vector<int64_t> v_cache_handle_vec,
+	int64_t layer_id,
 	int64_t num_layers,
 	int64_t num_heads,
 	const std::vector<int64_t> &context_parallel_config,	// Generated via ParallelConfig.to_list()
@@ -522,14 +532,14 @@ bool register_ipc_mem_handle(
 		context_end_head <= decoding_start_head || context_start_head >= decoding_end_head) {
 		// No overlap
 		return false;
-	} else {
-		// Overlap
-		// Register the handle
-		const int64_t context_worker_hash = (context_pp_rank<<6) + context_tp_rank;
-		CUDA_CHECK(cudaIpcOpenMemHandle(&context_worker_k_cache_addr[context_worker_hash], k_cache_handle, cudaIpcMemLazyEnablePeerAccess));
-		CUDA_CHECK(cudaIpcOpenMemHandle(&context_worker_v_cache_addr[context_worker_hash], v_cache_handle, cudaIpcMemLazyEnablePeerAccess));
-		return true;
 	}
+
+    // Overlap: Register the handle
+    const int64_t context_worker_hash = (context_pp_rank << PP_RANK_SHIFT) + context_tp_rank;
+    CUDA_CHECK(cudaIpcOpenMemHandle(&context_worker_k_cache_addr[layer_id][context_worker_hash], k_cache_handle, cudaIpcMemLazyEnablePeerAccess));
+    CUDA_CHECK(cudaIpcOpenMemHandle(&context_worker_v_cache_addr[layer_id][context_worker_hash], v_cache_handle, cudaIpcMemLazyEnablePeerAccess));
+    return true;
+
 }
 
 /*
@@ -546,8 +556,173 @@ Here we do not pass a cudaStream to the function. Instead we use the current
 stream indicated by at::cuda::getCurrentCUDAStream(). So it is python's
 responsibility to set the current stream before calling this function.
 */
-
 void migrate_blocks(
+	// Parallelism parameters for the context stage engine
+	const int64_t context_pp_size,
+	const int64_t context_tp_size,
+
+	// Block indexes of the context stage engine
+	const std::vector<int64_t> &context_block_indexes,
+
+	// Parallelism parameters for the decoding stage engine
+	const int64_t decoding_pp_size,
+	const int64_t decoding_tp_size,
+
+	// Rank of the decoding stage worker that calls this function
+	const int64_t decoding_pp_rank,
+	const int64_t decoding_tp_rank,
+
+	// Block indexes of the decoding stage engine
+	const std::vector<int64_t> &decoding_block_indexes,
+
+	// The decoding stage worker's KV cache
+	//      K.shape = (num_blocks, num_heads, head_size // x, block_size, x)
+    //      V.shape = (num_blocks, num_heads, head_size, block_size, x)
+    // where
+    //      element_size = dtype.itemsize
+    //      x = 16 // element_size
+	std::vector<torch::Tensor>& decoding_worker_k_caches,
+	std::vector<torch::Tensor>& decoding_worker_v_caches
+) {
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    //
+    // Calculate dimensions of the KV cache blocks
+    //
+    // element_size = dtype.itemsize
+    // x = 16 // element_size
+    // K: (num_blocks, num_heads, head_size // x, block_size, x)
+    // V: (num_blocks, num_heads, head_size, block_size, x)
+
+    // FIXME: Assume the mapping is one-to-one.
+    //     This means Prefill(i) -> Decode(i),
+    //     and don't think about cases such as Prefill(i) -> Decode(j) where i != j.
+
+
+    // Copy K cache from prefill to decode.
+    {
+        const int64_t num_layers = decoding_block_indexes.size();
+
+        const int64_t num_blocks = decoding_worker_k_caches[0].size(0);
+        const int64_t num_heads = decoding_worker_k_caches[0].size(1);
+        const int64_t head_size_by_x = decoding_worker_k_caches[0].size(2);
+        const int64_t block_size = decoding_worker_k_caches[0].size(3);
+        const int64_t x = decoding_worker_k_caches[0].size(4);
+
+        for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
+                const int64_t context_block_index = context_block_indexes[block_id];
+                const int64_t decoding_block_index = decoding_block_indexes[block_id];
+
+                const int64_t context_pp_rank = 0; // assume no PP for context
+                const int64_t context_tp_rank = decoding_tp_rank; // assume one-to-one mapping
+                const int64_t context_worker_hash = (context_pp_rank << PP_RANK_SHIFT) + context_tp_rank;
+                const int64_t decoding_worker_hash = (decoding_pp_rank << PP_RANK_SHIFT) + decoding_tp_rank;
+
+                char* context_worker_base_ptr = (char*) context_worker_k_cache_addr[num_layers][context_worker_hash];
+                char* decoding_worker_base_ptr = (char*) decoding_worker_k_caches[num_layers].data_ptr();
+
+
+
+                context_worker_base_ptr += INDEX_5D(
+                    // dim: (num_blocks, num_heads, head_size // x, block_size, x)
+                    num_blocks, num_heads, head_size_by_x, block_size, x
+                    // offset
+                    context_block_index, 0, 0, 0, 0
+                );
+                decoding_worker_base_ptr += INDEX_5D(
+                    // dim: (num_blocks, num_heads, head_size // x, block_size, x)
+                    num_blocks, num_heads, head_size_by_x, block_size, x
+                    // offset
+                    decoding_block_index, 0, 0, 0, 0
+                );
+
+                const size_t bytes_to_copy = num_heads * head_size_by_x * block_size * x;
+
+                CUDA_CHECK(cudaMemcpyAsync(
+                    decoding_worker_base_ptr,
+                    context_worker_base_ptr,
+                    bytes_to_copy,
+                    cudaMemcpyDeviceToDevice,
+                    stream
+                ));
+            }
+        }
+    }
+
+
+    // Copy V cache from prefill to decode.
+    // (Duplicate most code for readability)
+    {
+        const int64_t num_layers = decoding_block_indexes.size();
+
+        const int64_t num_blocks = decoding_worker_k_caches[0].size(0);
+        const int64_t num_heads = decoding_worker_k_caches[0].size(1);
+        const int64_t head_size = decoding_worker_k_caches[0].size(2);
+        const int64_t block_size = decoding_worker_k_caches[0].size(3);
+
+        for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
+                const int64_t context_block_index = context_block_indexes[block_id];
+                const int64_t decoding_block_index = decoding_block_indexes[block_id];
+
+                const int64_t context_pp_rank = 0; // assume no PP for context
+                const int64_t context_tp_rank = decoding_tp_rank; // assume one-to-one mapping
+                const int64_t context_worker_hash = (context_pp_rank << PP_RANK_SHIFT) + context_tp_rank;
+                const int64_t decoding_worker_hash = (decoding_pp_rank << PP_RANK_SHIFT) + decoding_tp_rank;
+
+                char* context_worker_base_ptr = (char*) context_worker_v_cache_addr[num_layers][context_worker_hash];
+                char* decoding_worker_base_ptr = (char*) decoding_worker_v_caches[num_layers].data_ptr();
+
+
+                context_worker_base_ptr += INDEX_4D(
+                    // dim: (num_blocks, num_heads, head_size, block_size)
+                    num_blocks, num_heads, head_size, block_size,
+                    // offset
+                    context_block_index, 0, 0, 0
+                );
+                decoding_worker_base_ptr += INDEX_4D(
+                    // dim: (num_blocks, num_heads, head_size, block_size)
+                    num_blocks, num_heads, head_size, block_size,
+                    // offset
+                    decoding_block_index, 0, 0, 0,
+                );
+
+                const size_t bytes_to_copy = num_heads * head_size * block_size;
+
+                CUDA_CHECK(cudaMemcpyAsync(
+                    decoding_worker_base_ptr,
+                    context_worker_base_ptr,
+                    bytes_to_copy,
+                    cudaMemcpyDeviceToDevice,
+                    stream
+                ));
+            }
+        }
+    }
+    return ;
+
+}
+
+/*
+migrate_blocks__block_contiguous: Migrate blocks from the context stage engine to the decoding stage engine
+
+This function is called by every decoding stage worker when the decoding
+stage engine decides to migrate some blocks from the context stage engine
+to the decoding stage engine.
+
+In the following code, "pp" stands for "pipeline parallel", and "tp" stands
+for "tensor parallel".
+
+Here we do not pass a cudaStream to the function. Instead we use the current
+stream indicated by at::cuda::getCurrentCUDAStream(). So it is python's
+responsibility to set the current stream before calling this function.
+
+// FIXME: Use this function in vLLM to achieve best KV cache transfer.
+//        This is not true in the current vLLM implementation because
+//        KV Cache are separated with layers.
+*/
+
+void migrate_blocks__block_contiguous(
 	// Parallelism parameters for the context stage engine
 	const int64_t context_pp_size,
 	const int64_t context_tp_size,

@@ -1,7 +1,7 @@
 """A GPU worker class."""
 import os
 from time import sleep
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TypeAlias
 
 import torch
 import torch.distributed
@@ -14,11 +14,16 @@ from vllm.model_executor.parallel_utils.communication_op import (
 from vllm.model_executor.parallel_utils.parallel_state import (
     initialize_model_parallel, get_tensor_model_parallel_src_rank,
     get_tensor_model_parallel_group, get_tensor_model_parallel_rank,
-    get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized)
+    get_pipeline_model_parallel_first_rank, ensure_model_parallel_initialized,
+    get_tensor_model_parallel_world_size,
+    get_pipeline_model_parallel_world_size)
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.utils import debug_slept, debug_pront
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.model_runner import ModelRunner
+from vllm._C import cache_ops
+
+IPCMemHandler: TypeAlias = List[int]
 
 
 class Worker:
@@ -140,6 +145,45 @@ class Worker:
         self.gpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
+    def get_mem_handlers(self) -> List[Tuple[IPCMemHandler, IPCMemHandler]]:
+        # FIXME: Function should be owned by cache engine.
+        #  I just want to reduce mental complexity by
+        #  moving this function to worker.
+        handlers = []
+        for layer_id, (k_tensor, v_tensor) in enumerate(self.gpu_cache):
+            item = (cache_ops.get_ipc_mem_handle(k_tensor),
+                    cache_ops.get_ipc_mem_handle(v_tensor))
+            handlers.append(item)
+        return handlers
+
+    def register_mem_handlers(
+            self,
+            handlers: List[Tuple[IPCMemHandler, IPCMemHandler]],
+            prefill_config  # (tp_size, tp_rank, pp_size, pp_rank)
+    ):
+
+        # FIXME: hard code the pp-size and pp-rank
+        assert self.parallel_config.is_disaggregate, "Only call function `register_mem_handlers` in disaggregation."
+        assert get_pipeline_model_parallel_world_size() == 2
+        decode_config = [
+            get_tensor_model_parallel_world_size(),
+            get_tensor_model_parallel_rank(), 1, 0
+        ]  # (tp_size, tp_rank, pp_size, pp_rank)
+
+        num_layers = self.cache_engine.num_layers
+        num_heads = self.cache_engine.num_heads
+        for layer_id, (k_handler, v_handler) in enumerate(handlers):
+            cache_ops.register_ipc_mem_handle(
+                k_handler,
+                v_handler,
+                layer_id,
+                num_layers,
+                num_heads,
+                prefill_config,
+                decode_config,
+            )
+        return
+
     def execute_lambda(self, lambda_fn, *args, **kwargs):
         return lambda_fn(self, *args, **kwargs)
 
@@ -197,9 +241,12 @@ class Worker:
             return leader_rank == rank
 
         if is_prefill_worker():
-            self.cache_engine.send_blocks(send_blocks)
+            # self.cache_engine.send_blocks(send_blocks)
+            pass
         else:
-            self.cache_engine.recv_blocks(recv_blocks)
+            # self.cache_engine.recv_blocks(recv_blocks)
+            self.cache_engine.retrieve_blocks(send_blocks, recv_blocks)
+            pass
         return
 
     # FIXME: (hack) SHOULD NOT BE IN MASTER!
