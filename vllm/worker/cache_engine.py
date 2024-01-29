@@ -211,26 +211,6 @@ class CacheEngine:
         # Call the kernel
         x = 16 // torch.tensor([], dtype=self.dtype).element_size()
 
-
-        debug_pront_3(
-            f"Calling cache_ops.retrieve_blocks() with "
-            f"{self.num_layers = }, {self.num_gpu_blocks = }, {self.num_heads = }, "
-            f"{self.head_size = }, {self.block_size = }, {x = }, "
-            f"{decoding_tp_rank = }, {src_block_ids = }, {dst_block_ids = }, "
-            f"{decoding_worker_k_caches = }, {decoding_worker_v_caches = }"
-        )
-
-        debug_pront_3(
-            f"Each has type "
-            f"{type(self.num_layers) = }, {type(self.num_gpu_blocks) = }, {type(self.num_heads) = }, "
-            f"{type(self.head_size) = }, {type(self.block_size) = }, {type(x) = }, "
-            f"{type(decoding_tp_rank) = }, {type(src_block_ids) = }, {type(dst_block_ids) = }, "
-            f"{type(decoding_worker_k_caches) = }, {type(decoding_worker_v_caches) = }"
-            f"{type(decoding_worker_k_caches[0]) = }, {type(decoding_worker_v_caches[0]) = }"
-        )
-
-
-        time.sleep(10)
         cache_ops.migrate_blocks(
             int(self.num_layers),
             int(self.num_gpu_blocks),
