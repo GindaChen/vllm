@@ -678,7 +678,7 @@ void migrate_blocks(
                 );
                 decoding_worker_base_ptr += INDEX_4D(
                     num_blocks, num_heads, head_size, block_size,
-                    decoding_block_index, 0, 0, 0,
+                    decoding_block_index, 0, 0, 0
                 );
 
                 const size_t bytes_to_copy = num_heads * head_size * block_size;
