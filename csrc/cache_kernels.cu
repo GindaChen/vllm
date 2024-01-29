@@ -623,16 +623,13 @@ void migrate_blocks(
 
 
 
+                // dim: (num_blocks, num_heads, head_size // x, block_size, x)
                 context_worker_base_ptr += INDEX_5D(
-                    // dim: (num_blocks, num_heads, head_size // x, block_size, x)
-                    num_blocks, num_heads, head_size_by_x, block_size, x
-                    // offset
+                    num_blocks, num_heads, head_size_by_x, block_size, x,
                     context_block_index, 0, 0, 0, 0
                 );
                 decoding_worker_base_ptr += INDEX_5D(
-                    // dim: (num_blocks, num_heads, head_size // x, block_size, x)
-                    num_blocks, num_heads, head_size_by_x, block_size, x
-                    // offset
+                    num_blocks, num_heads, head_size_by_x, block_size, x,
                     decoding_block_index, 0, 0, 0, 0
                 );
 
@@ -674,16 +671,13 @@ void migrate_blocks(
                 char* decoding_worker_base_ptr = (char*) decoding_worker_v_caches[num_layers].data_ptr();
 
 
+                // dim: (num_blocks, num_heads, head_size, block_size)
                 context_worker_base_ptr += INDEX_4D(
-                    // dim: (num_blocks, num_heads, head_size, block_size)
                     num_blocks, num_heads, head_size, block_size,
-                    // offset
                     context_block_index, 0, 0, 0
                 );
                 decoding_worker_base_ptr += INDEX_4D(
-                    // dim: (num_blocks, num_heads, head_size, block_size)
                     num_blocks, num_heads, head_size, block_size,
-                    // offset
                     decoding_block_index, 0, 0, 0,
                 );
 
