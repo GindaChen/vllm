@@ -208,8 +208,8 @@ class CacheEngine:
         total_size = 0
 
         N = len(block_ids)
-        k_tensor = torch.empty(N, *self.get_key_block_shape())
-        v_tensor = torch.empty(N, *self.get_value_block_shape())
+        k_tensor = torch.empty(N, *self.get_key_block_shape(), device="cuda")
+        v_tensor = torch.empty(N, *self.get_value_block_shape(), device="cuda")
 
         for i in range(self.num_layers):
             for j, block_id in enumerate(block_ids):
@@ -234,8 +234,8 @@ class CacheEngine:
         total_size = 0
 
         N = len(block_ids)
-        k_tensor = torch.empty(N, *self.get_key_block_shape())
-        v_tensor = torch.empty(N, *self.get_value_block_shape())
+        k_tensor = torch.empty(N, *self.get_key_block_shape(), device="cuda")
+        v_tensor = torch.empty(N, *self.get_value_block_shape(), device="cuda")
 
         for i in range(self.num_layers):
             e1 = torch.distributed.irecv(k_tensor, src=rank)
