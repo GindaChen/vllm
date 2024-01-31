@@ -258,6 +258,8 @@ class LlamaModel(nn.Module):
                 input_metadata,
                 residual,
             )
+            # torch.ops.cache_ops.swap_cpu()
+            # Swapping KV cache ...
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 

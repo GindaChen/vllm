@@ -13,6 +13,7 @@ from vllm.core.dist_scheduler import DistScheduler
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.metrics import record_metrics
+from vllm.engine.multiproc_utils import WorkerProcess, WorkerFuture
 from vllm.engine.ray_utils import RayWorkerVllm, initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
@@ -22,6 +23,7 @@ from vllm.sequence import (SamplerOutput, Sequence, SequenceGroup,
 from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                get_tokenizer)
 from vllm.utils import Counter, set_cuda_visible_devices, get_ip, get_open_port, get_distributed_init_method
+from vllm.worker.worker import Worker
 
 if ray:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -106,10 +108,11 @@ class LLMEngine:
         # Create the parallel GPU workers.
         if self.parallel_config.worker_use_ray:
             # Disable Ray usage stats collection.
-            ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
-            if ray_usage != "1":
-                os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
-            self._init_workers_ray(placement_group)
+            # ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
+            # if ray_usage != "1":
+            #     os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
+            # self._init_workers_ray(placement_group)
+            self._init_workers_multiproc()
         else:
             self._init_workers()
 
@@ -167,6 +170,52 @@ class LLMEngine:
         )
         self._run_workers("init_model")
         self._run_workers("load_model")
+
+    def _init_workers_multiproc(self):
+        model_config = copy.deepcopy(self.model_config)
+        parallel_config = copy.deepcopy(self.parallel_config)
+        scheduler_config = copy.deepcopy(self.scheduler_config)
+
+        # Init all workers
+        distributed_init_method = get_distributed_init_method(
+            get_ip(), get_open_port())
+
+        from vllm.worker.worker import Worker
+        workers = []
+        driver_worker = Worker(
+            model_config,
+            parallel_config,
+            scheduler_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method=distributed_init_method,
+            is_driver_worker=False,
+        )
+        self.driver_worker = driver_worker
+
+        for i in range(1, self.parallel_config.world_size):
+            local_rank = i
+            rank = i
+            worker = WorkerProcess(
+                model_config,
+                parallel_config,
+                scheduler_config,
+                local_rank,  # FIXME: understand the local rank of the worker
+                rank,
+                distributed_init_method,
+                is_driver_worker=False,
+            )
+            workers.append(worker)
+            pass
+
+        self.workers = workers
+        self._run_workers("init_model")
+        self._run_workers(
+            "load_model",
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
+        )
+        pass
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -1037,9 +1086,35 @@ class LLMEngine:
             raise NotImplementedError(
                 "max_concurrent_workers is not supported yet.")
 
+        def _execute(worker, method, *args, **kwargs):
+            """Executes the given method on the worker. Returns a handler if
+            the worker is remote, otherwise returns the output directly.
+            """
+            # Local worker
+            if isinstance(worker, Worker):
+                return getattr(worker, method)(*args, **kwargs)
+            # Ray worker
+            if isinstance(worker, RayWorkerVllm):
+                return worker.execute_method.remote(method, *args, **kwargs)
+            # Multi-proc worker process
+            if isinstance(worker, WorkerProcess):
+                return worker.execute_method_future(method, *args, **kwargs)
+
+        def _get_return_value(worker, output):
+            """Auxiliary function to get the return value of the worker."""
+            # Local worker
+            if isinstance(worker, Worker):
+                return output
+            # Ray worker
+            if isinstance(worker, RayWorkerVllm):
+                return ray.get(output)
+            # Multi-proc worker process
+            if isinstance(worker, WorkerProcess):
+                return output.result()
+
         # Start the ray workers first.
-        ray_worker_outputs = [
-            worker.execute_method.remote(method, *args, **kwargs)
+        other_worker_outputs = [
+            _execute(worker, method, *args, **kwargs)
             for worker in self.workers
         ]
 
@@ -1049,14 +1124,18 @@ class LLMEngine:
             driver_kwargs = kwargs
 
         # Start the driver worker after all the ray workers.
-        driver_worker_output = getattr(self.driver_worker,
-                                       method)(*driver_args, **driver_kwargs)
+        driver_worker_output = _execute(self.driver_worker, method,
+                                        *driver_args, **driver_kwargs)
 
-        # Get the results of the ray workers.
-        if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
+        # Get the results
+        all_workers = [self.driver_worker] + self.workers
+        all_futures = [driver_worker_output] + other_worker_outputs
+        result = [
+            _get_return_value(worker, output)
+            for worker, output in zip(all_workers, all_futures)
+        ]
 
-        return [driver_worker_output] + ray_worker_outputs
+        return result
 
     def _run_worker_group(
         self,
