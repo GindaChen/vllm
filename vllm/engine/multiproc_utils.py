@@ -71,6 +71,10 @@ class WorkerProcess:
         )
         pass
 
+    def start_worker(self):
+        self.worker.start()
+        return self
+
     def execute_method_future(self, method, *args, **kwargs):
         self.inbound_queue.put((method, args, kwargs))
         # FIXME: This is a hack!
