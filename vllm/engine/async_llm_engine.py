@@ -8,7 +8,7 @@ from vllm.config import ModelConfig
 from vllm.core.dist_scheduler import DistScheduler, DistScheduleOutput
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.llm_engine import LLMEngine
-from vllm.engine.ray_utils import initialize_cluster, ray
+from vllm.engine.ray_utils import initialize_cluster, ray, RayWorkerVllm
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
@@ -410,7 +410,7 @@ class _AsyncLLMEngine(LLMEngine):
 
     async def _run_dist_worker_group_async(
         self,
-        worker_group: 'List[Union[RayWorkerVllm, Worker]]',
+        worker_group: 'List[Union[RayWorkerVllm, Worker, WorkerProcess]]',
         method: str,
         *args,
         driver_args: Optional[List[Any]] = None,
@@ -421,31 +421,36 @@ class _AsyncLLMEngine(LLMEngine):
         """Runs the given method on all workers in the given worker group."""
         assert self.parallel_config.is_disaggregate
 
-        if driver_args is None:
-            driver_args = args
-        if driver_kwargs is None:
-            driver_kwargs = kwargs
+        driver_args = driver_args if driver_args is not None else args
+        driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
 
-        def _is_local(worker) -> bool:
-            """Returns true if the worker is a local worker (wrt the driver)."""
-            return getattr(worker, 'is_driver_worker', False)
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
+
+        from vllm.worker.worker import Worker
+        from vllm.engine.multiproc_utils import WorkerProcess
 
         def _execute(worker, method, *args, **kwargs):
             """Executes the given method on the worker. Returns a handler if
             the worker is remote, otherwise returns the output directly.
             """
-            if _is_local(worker):
+            # Local worker
+            if isinstance(worker, Worker):
                 method = getattr(worker, method)
                 func = partial(method, *args, **kwargs)
                 coro = asyncio.get_event_loop().run_in_executor(None, func)
                 return coro
-            return worker.execute_method.remote(method, *args, **kwargs)
+            # Ray worker
+            if isinstance(worker, RayWorkerVllm):
+                return worker.execute_method.remote(method, *args, **kwargs)
+            # Multi-proc worker process
+            if isinstance(worker, WorkerProcess):
+                return worker.execute_method_async(method, *args, **kwargs)
 
-        def _get_return_value(worker, output):
+        async def _get_return_value(worker, output):
             """Auxiliary function to get the return value of the worker."""
-            if _is_local(worker):
-                return output
-            return ray.get(output)
+            return await output
 
         if max_concurrent_workers:
             raise NotImplementedError(
@@ -457,15 +462,16 @@ class _AsyncLLMEngine(LLMEngine):
         lead_worker_output = _execute(lead_worker, method, *driver_args,
                                       **driver_kwargs)
 
-        # Start the rest of the workers
-        # TODO: Is the type actually right for ray outputs?
-        #  Don't we need to use ray.get()?
         rest_worker_outputs = [
             _execute(worker, method, *args, **kwargs)
             for worker in rest_workers
         ]
 
         coros = [lead_worker_output] + rest_worker_outputs
+        coros = [
+            _get_return_value(worker, coro)
+            for worker, coro in zip(worker_group, coros)
+        ]
 
         all_outputs = await asyncio.gather(*coros)
         return all_outputs

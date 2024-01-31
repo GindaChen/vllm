@@ -86,6 +86,7 @@ class WorkerProcess:
         return result
 
     async def execute_method_async(self, method, *args, **kwargs):
+        # FIXME: There is a better way to write this.
         self.inbound_queue.put((method, args, kwargs))
         while self.outbound_queue.empty():
             await asyncio.sleep(0)
