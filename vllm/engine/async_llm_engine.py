@@ -612,6 +612,9 @@ class AsyncLLMEngine:
         while True:
             if not has_requests_in_progress:
                 if return_at_finish:
+                    debug_pront_2("All requests has finished. Killing the workers.")
+                    self.engine._kill_workers()
+                    debug_pront_2("All requests has finished. Exiting the engine loop.")
                     return
                 # Wait for new requests if there are no requests in progress.
                 debug_pront_2("Waiting for new requests...")

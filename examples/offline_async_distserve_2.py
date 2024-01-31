@@ -48,6 +48,7 @@ async def main():
                 result_generators.remove(gen)
             pass
         pass
+    print("Finishing all requests.")
 
     return final_output
 

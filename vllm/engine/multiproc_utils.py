@@ -75,6 +75,11 @@ class WorkerProcess:
         self.worker.start()
         return self
 
+    def kill_worker(self):
+        self.inbound_queue.put(None)
+        self.worker.join()
+        pass
+
     def execute_method_future(self, method, *args, **kwargs):
         self.inbound_queue.put((method, args, kwargs))
         # FIXME: This is a hack!
