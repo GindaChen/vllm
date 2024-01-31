@@ -204,7 +204,7 @@ class LLMEngine:
                 rank,
                 distributed_init_method,
                 is_driver_worker=False,
-            )
+            ).start_worker()
             workers.append(worker)
             pass
 
