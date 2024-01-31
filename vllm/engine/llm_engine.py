@@ -1155,27 +1155,35 @@ class LLMEngine:
         driver_args = driver_args if driver_args is not None else args
         driver_kwargs = driver_kwargs if driver_kwargs is not None else kwargs
 
-        def _is_local(worker) -> bool:
-            """Returns true if the worker is a local worker (wrt the driver)."""
-            return getattr(worker, 'is_driver_worker', False)
+        if max_concurrent_workers:
+            raise NotImplementedError(
+                "max_concurrent_workers is not supported yet.")
 
         def _execute(worker, method, *args, **kwargs):
             """Executes the given method on the worker. Returns a handler if
             the worker is remote, otherwise returns the output directly.
             """
-            if _is_local(worker):
+            # Local worker
+            if isinstance(worker, Worker):
                 return getattr(worker, method)(*args, **kwargs)
-            return worker.execute_method.remote(method, *args, **kwargs)
+            # Ray worker
+            if isinstance(worker, RayWorkerVllm):
+                return worker.execute_method.remote(method, *args, **kwargs)
+            # Multi-proc worker process
+            if isinstance(worker, WorkerProcess):
+                return worker.execute_method_future(method, *args, **kwargs)
 
         def _get_return_value(worker, output):
             """Auxiliary function to get the return value of the worker."""
-            if _is_local(worker):
+            # Local worker
+            if isinstance(worker, Worker):
                 return output
-            return ray.get(output)
-
-        if max_concurrent_workers:
-            raise NotImplementedError(
-                "max_concurrent_workers is not supported yet.")
+            # Ray worker
+            if isinstance(worker, RayWorkerVllm):
+                return ray.get(output)
+            # Multi-proc worker process
+            if isinstance(worker, WorkerProcess):
+                return output.result()
 
         lead_worker, rest_workers = worker_group[0], worker_group[1:]
 
@@ -1203,7 +1211,7 @@ class LLMEngine:
                 r = _get_return_value(worker, output)
                 result.append(r)
             except Exception as e:
-                logger.error(f"Ray worker {worker_id} failed with error: {e}")
+                logger.error(f"Worker {worker_id} failed with error: {e}")
                 traceback.print_exc()
                 has_error = True
                 pass
