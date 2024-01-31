@@ -30,11 +30,12 @@ def init_worker_loop(
     while True:
         task = inbound_queue.get()
         if task is None:
+            print(f"Worker {rank} received None, exiting.")
             break
         method, args, kwargs = task
         result = getattr(worker, method)(*args, **kwargs)
         outbound_queue.put(result)
-    pass
+    return
 
 
 class WorkerFuture:
