@@ -214,8 +214,8 @@ class CacheEngine:
         for i in range(self.num_layers):
             for j, block_id in enumerate(block_ids):
                 blocks = self.gpu_cache[i]
-                block = blocks[block_id]
-                k_block, v_block = block
+                k_block = blocks[0][block_id]
+                v_block = blocks[1][block_id]
                 k_tensor[j, :] = k_block
                 v_tensor[j, :] = v_block
             torch.distributed.isend(k_tensor, dst=rank)
@@ -246,8 +246,8 @@ class CacheEngine:
             e2 = torch.distributed.irecv(v_tensor, src=rank)
             e2.wait()
             for j, block_id in enumerate(block_ids):
-                self.gpu_cache[i][block_id][0][:] = k_tensor[j, :]
-                self.gpu_cache[i][block_id][1][:] = v_tensor[j, :]
+                self.gpu_cache[i][0][block_id][:] = k_tensor[j, :]
+                self.gpu_cache[i][1][block_id][:] = v_tensor[j, :]
 
         end_time = time.perf_counter()
         duration = end_time - start_time
