@@ -240,13 +240,22 @@ class Worker:
             rank = torch.distributed.get_rank()
             return leader_rank == rank
 
+        # Method 1: Send/Recv blocks
         if is_prefill_worker():
             # self.cache_engine.send_blocks(send_blocks)
+            self.cache_engine.send_blocks_batch_layer(send_blocks)
             pass
         else:
             # self.cache_engine.recv_blocks(recv_blocks)
-            self.cache_engine.retrieve_blocks(send_blocks, recv_blocks)
+            self.cache_engine.recv_blocks_batch_layer(send_blocks)
             pass
+
+        # Method 2: Retrive blocks
+        # if is_prefill_worker():
+        #     pass
+        # else:
+        #     self.cache_engine.retrieve_blocks(send_blocks, recv_blocks)
+
         return
 
     # FIXME: (hack) SHOULD NOT BE IN MASTER!
