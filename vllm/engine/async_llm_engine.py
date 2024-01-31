@@ -797,8 +797,9 @@ class AsyncLLMEngine:
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
         # Initialize the cluster.
-        placement_group = initialize_cluster(parallel_config,
-                                             engine_args.engine_use_ray)
+        # placement_group = initialize_cluster(parallel_config,
+        #                                      engine_args.engine_use_ray)
+        placement_group = None
         # Create the async LLM engine.
         engine = cls(parallel_config.worker_use_ray,
                      engine_args.engine_use_ray,
