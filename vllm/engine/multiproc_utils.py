@@ -89,6 +89,6 @@ class WorkerProcess:
         # FIXME: There is a better way to write this.
         self.inbound_queue.put((method, args, kwargs))
         while self.outbound_queue.empty():
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.001)
         result = self.outbound_queue.get()
         return result
