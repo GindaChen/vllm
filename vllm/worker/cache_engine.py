@@ -202,7 +202,6 @@ class CacheEngine:
 
     def send_blocks_batch_layer(self, block_ids):
         # TODO: Batch and chunk the blocks such that it reuses big-pages to do the block transfer.
-        tasks = []
         rank = get_pipeline_model_parallel_next_rank()
         start_time = time.perf_counter()
         total_size = 0
@@ -231,22 +230,24 @@ class CacheEngine:
         return
 
     def recv_blocks_batch_layer(self, block_ids):
-        tasks = []
-        rank = get_pipeline_model_parallel_next_rank()
+        rank = get_pipeline_model_parallel_prev_rank()
         start_time = time.perf_counter()
         total_size = 0
 
         N = len(block_ids)
-        k_tensor = torch.empty(N, *self.get_key_block_shape(), device="cuda")
-        v_tensor = torch.empty(N, *self.get_value_block_shape(), device="cuda")
+        k_tensor = torch.zeros(N, *self.get_key_block_shape(), device="cuda")
+        v_tensor = torch.zeros(N, *self.get_value_block_shape(), device="cuda")
 
         for i in range(self.num_layers):
             e1 = torch.distributed.irecv(k_tensor, src=rank)
-            e1.wait()
             e2 = torch.distributed.irecv(v_tensor, src=rank)
-            e2.wait()
+
+            e1.wait()
             for j, block_id in enumerate(block_ids):
                 self.gpu_cache[i][0][block_id][:] = k_tensor[j, :]
+
+            e2.wait()
+            for j, block_id in enumerate(block_ids):
                 self.gpu_cache[i][1][block_id][:] = v_tensor[j, :]
 
         end_time = time.perf_counter()
