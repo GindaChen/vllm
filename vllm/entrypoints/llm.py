@@ -189,7 +189,11 @@ class LLM:
                                     prompt_token_ids,
                                     lora_request=lora_request)
 
+<<<<<<< HEAD
     def _run_engine_generator(self, use_tqdm: bool) -> Generator[List[RequestOutput], List[RequestOutput]]:
+=======
+    def _run_engine_generator(self, use_tqdm: bool) -> Generator:
+>>>>>>> aa6aac9dd1039c5214f2ebda65423d0b5aa60aa7
         """Same as `_run_engine`, but returns a generator instead of a list."""
         # Initialize tqdm.
         if use_tqdm:
