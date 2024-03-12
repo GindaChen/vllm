@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Generator
 
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
@@ -126,6 +126,7 @@ class LLM:
         prompt_token_ids: Optional[List[List[int]]] = None,
         use_tqdm: bool = True,
         lora_request: Optional[LoRARequest] = None,
+        should_run=True,
     ) -> List[RequestOutput]:
         """Generates the completions for the input prompts.
 
@@ -171,7 +172,8 @@ class LLM:
                               sampling_params,
                               token_ids,
                               lora_request=lora_request)
-        return self._run_engine(use_tqdm)
+        if should_run:
+            return self._run_engine(use_tqdm)
 
     def _add_request(
         self,
@@ -186,6 +188,32 @@ class LLM:
                                     sampling_params,
                                     prompt_token_ids,
                                     lora_request=lora_request)
+
+    def _run_engine_generator(self, use_tqdm: bool) -> Generator[List[RequestOutput], List[RequestOutput]]:
+        """Same as `_run_engine`, but returns a generator instead of a list."""
+        # Initialize tqdm.
+        if use_tqdm:
+            num_requests = self.llm_engine.get_num_unfinished_requests()
+            pbar = tqdm(total=num_requests,
+                        desc="Processed prompts",
+                        dynamic_ncols=True)
+        # Run the engine.
+        outputs: List[RequestOutput] = []
+        while self.llm_engine.has_unfinished_requests():
+            step_outputs = self.llm_engine.step()
+            for output in step_outputs:
+                if output.finished:
+                    outputs.append(output)
+                    if use_tqdm:
+                        pbar.update(1)
+            yield step_outputs, outputs
+        if use_tqdm:
+            pbar.close()
+        # Sort the outputs by request ID.
+        # This is necessary because some requests may be finished earlier than
+        # its previous requests.
+        outputs = sorted(outputs, key=lambda x: int(x.request_id))
+        return outputs
 
     def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
         # Initialize tqdm.
