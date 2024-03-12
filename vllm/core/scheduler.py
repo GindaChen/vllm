@@ -150,6 +150,11 @@ class Scheduler:
     def has_unfinished_seqs(self) -> bool:
         return self.waiting or self.running or self.swapped
 
+    def abort_all_unfinished_seq_groups(self) -> None:
+        seq_groups = self.waiting + self.running + self.swapped
+        for seq_group in seq_groups:
+            self.abort_seq_group(seq_group.request_id)
+
     def get_num_unfinished_seq_groups(self) -> int:
         return len(self.waiting) + len(self.running) + len(self.swapped)
 

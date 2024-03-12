@@ -238,3 +238,10 @@ class LLM:
         # its previous requests.
         outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
+
+    def abort_all_requests(self) -> List[RequestOutput]:
+        """Aborts all the requests and returns the outputs."""
+
+        request_ids = []
+        for request_id in request_ids:
+            self.llm_engine.abort_request(request_id)

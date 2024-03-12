@@ -289,6 +289,9 @@ class LLMEngine:
         """
         self.scheduler.abort_seq_group(request_id)
 
+    def abort_all_unfinished_requests(self) -> None:
+        self.scheduler.abort_all_unfinished_seq_groups()
+
     def get_model_config(self) -> ModelConfig:
         """Gets the model configuration."""
         return self.model_config
