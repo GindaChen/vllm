@@ -29,13 +29,17 @@ def register_websocket_session(router, get_engine):
 
                         prompt_text = kwargs.get('prompt_text', "")
                         prompt_ids = kwargs.get('prompt_ids', [])
+
                         sampling_params = SamplingParams(
                             **kwargs.get('sampling_params', {})
                         )
 
                         generator: 'AsyncStream' = await engine.add_request(
                             request_id,
-                            prompt_text,
+                            {
+                                'prompt': prompt_text,
+                                'prompt_ids': prompt_ids,
+                            },
                             sampling_params,
                         )
 

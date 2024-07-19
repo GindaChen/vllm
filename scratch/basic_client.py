@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import websockets
 import json
 
@@ -41,7 +42,7 @@ async def connect_to_server():
                 print("Connection closed")
 
         # Example usage
-        request_id = "example_request_1"
+        request_id = f"example_request_1-{uuid.uuid4()}"
         prompt_text = "This is a test prompt."
         prompt_ids = []
         sampling_params = dict(
