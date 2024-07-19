@@ -277,7 +277,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             prefix_cache_hit = (computed_block_nums is not None
                                 and len(computed_block_nums) > 0
                                 and self.sliding_window is None and is_prompt)
-            if self.chunked_prefill_enabled and prefix_cache_hit:
+            if self.chunked_prefill_enabled and prefix_cache_hit and self.attn_backend.get_name() != "flash-attn":
                 raise RuntimeError(
                     "chunked prefill cannot be used with prefix caching now.")
 
@@ -302,8 +302,26 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 tokens = [seq_data.get_last_token_id()]
             if prefix_cache_hit:
                 assert computed_block_nums is not None
-                context_len = len(computed_block_nums) * self.block_size
-                tokens = tokens[context_len:]
+                # context_len = len(computed_block_nums) * self.block_size
+                # tokens = tokens[context_len:]
+                prefix_cache_len = len(computed_block_nums) * self.block_size
+                # When prefix caching meets chunked prefill, we would be in
+                # the following three conditions:
+                #
+                #   - prefix_cache_len <= context_len:
+                #     - do normal chunked prefill and nothing special
+                #   - context_len < prefix_cache_len < seq_len:
+                #     - advance the context_len to seq_len to perform non-
+                #       cached parts of the sequence.
+                #   - prefix_cache_len >= seq_len:
+                #     - it means the current partial sequence is fully cache
+                #       hited, and no further computation is needed.
+                if context_len < prefix_cache_len < seq_len:
+                    tokens = tokens[(prefix_cache_len - context_len):]
+                    context_len = prefix_cache_len
+                elif seq_len <= prefix_cache_len:
+                    tokens = []
+                    context_len = seq_len
 
             # These are seq_len/context_len capped to the sliding window.
             # They are passed to decode kernel.
