@@ -6,6 +6,7 @@ import fastapi
 
 from vllm import AsyncLLMEngine
 from vllm.engine.async_llm_engine import AsyncStream
+from vllm.engine.async_llm_engine import AsyncStream
 from vllm.entrypoints.openai import api_server as openai_api_server_module
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.sampling_params import SamplingParams
@@ -14,6 +15,20 @@ from vllm.utils import FlexibleArgumentParser
 
 def get_engine() -> AsyncLLMEngine:
     return openai_api_server_module.engine
+
+
+# Patch AsyncStream with a few properties
+def AsyncStream__is_ready(self: AsyncStream):
+    return not self._queue.empty()
+
+
+def AsyncStream__get(self: AsyncStream):
+    assert self.is_ready()
+    return self._queue.get_nowait()
+
+
+AsyncStream.is_ready = AsyncStream__is_ready
+AsyncStream.get = AsyncStream__get
 
 
 # TODO: Refactor the data structure used for requests.
@@ -47,7 +62,6 @@ async def websocket_session(websocket: fastapi.WebSocket):
 
                     generator: 'AsyncStream' = await engine.add_request(
                         request_id,
-                        # prompt_ids,
                         {
                             'prompt': prompt_text,
                             'prompt_token_ids': prompt_token_ids,
@@ -78,18 +92,24 @@ async def websocket_session(websocket: fastapi.WebSocket):
                     keys = active_sequences.keys()
 
                 for request_id in keys:
-                    print(f"Handle send_responses for request_id: {request_id}")
-                    generator = active_sequences.get(request_id, None)
-                    from vllm.engine.async_llm_engine import AsyncStream
+                    generator: AsyncStream = active_sequences.get(request_id, None)
+
                     assert isinstance(generator, AsyncStream) or generator is None
                     if generator is None:
+                        print(f"Generator is None for request_id: {request_id}")
                         continue
+
+                    if not generator.is_ready():
+                        continue
+
+                    print(f"Handle send_responses for request_id: {request_id}")
 
                     if generator.is_ready():
                         print(f"Generator is ready for request_id: {request_id}")
                         try:
-                            response = await generator.get()
+                            response = generator.get()
                         except Exception as e:
+                            print(f"Request finished generation: {request_id =}, or with exception: {e}")
                             # Delete the handler
                             to_delete.append(request_id)
                             # Send the abort message
@@ -101,7 +121,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                             ))
                             continue
 
-                        print(response)
+                        print(f"Sending response for request_id: {request_id} -> {response}")
                         # TODO: Only send the prefix, not the whole stuff.
                         outputs = response.outputs
                         outputs_ = [asdict(i) for i in outputs]
@@ -117,6 +137,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                     async with active_sequences_lock:
                         if request_id in active_sequences:
                             del active_sequences[request_id]
+                            print(f"Deleted request_id: {request_id}")
 
                 await asyncio.sleep(0)
 

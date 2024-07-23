@@ -45,13 +45,13 @@ class MetricStore:
         return self.metrics
 
 
-async def send_create_request(websocket, request_id, prompt_text, prompt_ids, sampling_params):
+async def send_create_request(websocket, request_id, prompt_text, prompt_token_ids, sampling_params):
     request = {
         "action": "create",
         "kwargs": {
             "request_id": request_id,
             "prompt_text": prompt_text,
-            "prompt_ids": prompt_ids,
+            "prompt_token_ids": prompt_token_ids,
             "sampling_params": sampling_params
         }
     }
@@ -69,9 +69,9 @@ async def send_abort_request(websocket, request_id):
     await websocket.send(json.dumps(request))
     print(f"Sent abort request: {request}")
 
+metric_store = MetricStore()
 
 async def control_loop(websocket, base_prompt_len, backtrack_per_token, backtrack_len, splice_len, max_tokens):
-    metric_store = MetricStore()
     assert backtrack_len < splice_len, "Backtrack length should be less than splice length."
 
     sampling_params = {
@@ -101,6 +101,7 @@ async def control_loop(websocket, base_prompt_len, backtrack_per_token, backtrac
         for _ in range(backtrack_per_token):
             response = await websocket.recv()
             data = json.loads(response)
+            print(data)
             token = data['outputs'][0]['token_ids'][-1]
             print(f"Received token: {token}")
             prompt_token_ids.append(token)
