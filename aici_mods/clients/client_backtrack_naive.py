@@ -180,7 +180,10 @@ async def connect_to_server(args):
     print(metrics)
     if output_metric_path := args.output_metric:
         with open(output_metric_path, "w+") as f:
-            json.dump(metrics, f)
+            json.dump({
+                "metric_metadata": metric_store.metric_metadata,
+                "metrics": metrics
+            }, f)
             print(f"Saved metric to file {output_metric_path}")
         pass
 
