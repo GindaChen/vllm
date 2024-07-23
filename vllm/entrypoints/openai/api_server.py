@@ -162,13 +162,6 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
         return JSONResponse(content=generator.model_dump())
 
 
-def get_engine():
-    return engine
-from .api_server_ws import register_websocket_session
-register_websocket_session(router, get_engine)
-
-
-
 def build_app(args):
     app = fastapi.FastAPI(lifespan=lifespan)
     app.include_router(router)
