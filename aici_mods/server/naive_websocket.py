@@ -6,7 +6,6 @@ import fastapi
 
 from vllm import AsyncLLMEngine
 from vllm.engine.async_llm_engine import AsyncStream
-from vllm.engine.async_llm_engine import AsyncStream
 from vllm.entrypoints.openai import api_server as openai_api_server_module
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.sampling_params import SamplingParams
