@@ -26,9 +26,6 @@ def AsyncStream__get(self: AsyncStream):
     return self._queue.get_nowait()
 
 
-AsyncStream.is_ready = AsyncStream__is_ready
-AsyncStream.get = AsyncStream__get
-
 
 # TODO: Refactor the data structure used for requests.
 @openai_api_server_module.router.websocket("/v1/session")
