@@ -6,7 +6,6 @@ import fastapi
 
 from vllm import AsyncLLMEngine
 from vllm.engine.async_llm_engine import AsyncStream
-from vllm.engine.async_llm_engine import AsyncStream
 from vllm.entrypoints.openai import api_server as openai_api_server_module
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.sampling_params import SamplingParams
@@ -23,7 +22,7 @@ def AsyncStream__is_ready(self: AsyncStream):
 
 
 def AsyncStream__get(self: AsyncStream):
-    assert self.is_ready()
+    assert AsyncStream__is_ready(self)
     return self._queue.get_nowait()
 
 
@@ -99,39 +98,36 @@ async def websocket_session(websocket: fastapi.WebSocket):
                         print(f"Generator is None for request_id: {request_id}")
                         continue
 
-                    if not generator.is_ready():
+                    if not AsyncStream__is_ready(generator):
                         continue
 
-                    print(f"Handle send_responses for request_id: {request_id}")
-
-                    if generator.is_ready():
-                        print(f"Generator is ready for request_id: {request_id}")
-                        try:
-                            response = generator.get()
-                        except Exception as e:
-                            print(f"Request finished generation: {request_id =}, or with exception: {e}")
-                            # Delete the handler
-                            to_delete.append(request_id)
-                            # Send the abort message
-                            await websocket.send_json(dict(
-                                request_id=request_id,
-                                outputs=None,
-                                finished=True,
-                                metrics={},
-                            ))
-                            continue
-
-                        print(f"Sending response for request_id: {request_id} -> {response}")
-                        # TODO: Only send the prefix, not the whole stuff.
-                        outputs = response.outputs
-                        outputs_ = [asdict(i) for i in outputs]
+                    print(f"Generator is ready for request_id: {request_id}")
+                    try:
+                        response = AsyncStream__get(generator)
+                    except Exception as e:
+                        print(f"Request finished generation: {request_id =}, or with exception: {e}")
+                        # Delete the handler
+                        to_delete.append(request_id)
+                        # Send the abort message
                         await websocket.send_json(dict(
                             request_id=request_id,
-                            outputs=outputs_,
-                            finished=response.finished,
-                            metrics=asdict(response.metrics),
+                            outputs=None,
+                            finished=True,
+                            metrics={},
                         ))
-                        print(f"Sent response for request_id: {request_id}")
+                        continue
+
+                    print(f"Sending response for request_id: {request_id} -> {response}")
+                    # TODO: Only send the prefix, not the whole stuff.
+                    outputs = response.outputs
+                    outputs_ = [asdict(i) for i in outputs]
+                    await websocket.send_json(dict(
+                        request_id=request_id,
+                        outputs=outputs_,
+                        finished=response.finished,
+                        metrics=asdict(response.metrics),
+                    ))
+                    print(f"Sent response for request_id: {request_id}")
 
                 for request_id in to_delete:
                     async with active_sequences_lock:
