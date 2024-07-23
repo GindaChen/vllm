@@ -1,14 +1,11 @@
+# TODO: Refactor this file into AICI
 import asyncio
 from dataclasses import asdict
 
 import fastapi
 
-import vllm.entrypoints.openai.api_server as openai_api_server_module
 from vllm import AsyncLLMEngine
-from vllm.entrypoints.openai.api_server import (
-    run_server,
-    router,
-)
+from vllm.entrypoints.openai import api_server as openai_api_server_module
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.sampling_params import SamplingParams
 from vllm.utils import FlexibleArgumentParser
@@ -19,7 +16,7 @@ def get_engine() -> AsyncLLMEngine:
 
 
 # TODO: Refactor the data structure used for requests.
-@router.websocket("/v1/session")
+@openai_api_server_module.router.websocket("/v1/session")
 async def websocket_session(websocket: fastapi.WebSocket):
     await websocket.accept()
     active_sequences = {}
@@ -136,4 +133,4 @@ if __name__ == "__main__":
         description="vLLM OpenAI-Compatible RESTful API server.")
     parser = make_arg_parser(parser)
     args = parser.parse_args()
-    run_server(args)
+    openai_api_server_module.run_server(args)
