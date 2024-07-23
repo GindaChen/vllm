@@ -656,6 +656,12 @@ class AsyncLLMEngine:
             if isinstance(inputs, str):
                 shortened_prompt = inputs
                 shortened_token_ids = None
+            elif isinstance(inputs, list):
+                if any(not isinstance(i, int) for i in inputs):
+                    raise ValueError(
+                        f"Token IDs must be integers. Got: {inputs = }")
+                shortened_prompt = None
+                shortened_token_ids = inputs
             else:
                 shortened_prompt = inputs.get("prompt")
                 shortened_token_ids = inputs.get("prompt_token_ids")
