@@ -79,7 +79,8 @@ async def control_loop(websocket, base_prompt_len, backtrack_per_token, backtrac
         "temperature": 0.0,
         "max_tokens": max_tokens,
     }
-    prompt_token_ids = [263] * base_prompt_len
+    get_rand_token = lambda: random.randint(20, 2048)
+    prompt_token_ids = [get_rand_token() for _ in range(base_prompt_len)]
     cur_request_id = None
 
     while len(prompt_token_ids) <= max_tokens:
@@ -92,7 +93,7 @@ async def control_loop(websocket, base_prompt_len, backtrack_per_token, backtrac
         metric_store.log_request_sent(request_id, {
             "prompt_text": None,
             "prompt_token_ids": prompt_token_ids,
-            "sampling_params": sampling_params
+            "sampling_params": sampling_params,
         })
 
         # Receive response for n tokens
@@ -113,7 +114,7 @@ async def control_loop(websocket, base_prompt_len, backtrack_per_token, backtrac
         # Backtrack and splice tokens
         buffer_token_ids = prompt_token_ids[:-backtrack_len]
         print(f"Backtracked {backtrack_len} tokens. Length = {len(buffer_token_ids)}")
-        buffer_token_ids += [random.randint(20, 2048) for _ in range(splice_len)]
+        buffer_token_ids += [get_rand_token() for _ in range(splice_len)]
         print(f"Spliced {splice_len} tokens. Length = {len(buffer_token_ids)}")
 
     if cur_request_id is not None:
