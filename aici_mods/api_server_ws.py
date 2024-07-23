@@ -102,6 +102,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                             continue
 
                         print(response)
+                        # TODO: Only send the prefix, not the whole stuff.
                         outputs = response.outputs
                         outputs_ = [asdict(i) for i in outputs]
                         await websocket.send_json(dict(
@@ -117,7 +118,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                         if request_id in active_sequences:
                             del active_sequences[request_id]
 
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)
 
         except fastapi.WebSocketDisconnect:
             return
