@@ -39,7 +39,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                     assert request_id not in active_sequences
 
                     prompt_text = kwargs.get('prompt_text', None)
-                    prompt_ids = kwargs.get('prompt_ids', None)
+                    prompt_token_ids = kwargs.get('prompt_token_ids', None)
 
                     sampling_params = SamplingParams(
                         **kwargs.get('sampling_params', {})
@@ -50,7 +50,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                         # prompt_ids,
                         {
                             'prompt': prompt_text,
-                            'prompt_token_ids': prompt_ids,
+                            'prompt_token_ids': prompt_token_ids,
                         },
                         sampling_params,
                     )
