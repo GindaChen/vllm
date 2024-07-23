@@ -33,13 +33,16 @@ class MetricStore:
 
     def log_request_sent(self, request_id: str, metadata: Dict):
         if request_id not in self.metrics:
-            self.metrics[request_id] = {}
-        self.metrics[request_id]['sent_time'] = time.time()
-        self.metrics[request_id]['metadata'] = metadata
+            self.metrics[request_id] = []
+        self.metrics[request_id].append({
+            'event': 'send', 'metadata': metadata, 'time': time.time()
+        })
 
     def log_response_received(self, request_id: str):
-        if request_id in self.metrics:
-            self.metrics[request_id]['received_time'] = time.time()
+        assert request_id in self.metrics
+        self.metrics[request_id].append({
+            'event': 'recv', 'time': time.time()
+        })
 
     def get_metrics(self) -> Dict[str, Dict]:
         return self.metrics
@@ -86,6 +89,8 @@ async def control_loop(uri, base_prompt_len, backtrack_per_token, backtrack_len,
         prompt_token_ids = [get_rand_token() for _ in range(base_prompt_len)]
         cur_request_id = None
 
+        metric_id = f"{uuid.uuid4()}"
+
         while len(prompt_token_ids) <= max_tokens:
             request_id = f"bt-req-{uuid.uuid4()}"
             cur_request_id = request_id
@@ -93,36 +98,40 @@ async def control_loop(uri, base_prompt_len, backtrack_per_token, backtrack_len,
             # Create request
             print(f"Creating request with id: {request_id}. Length = {len(prompt_token_ids)}")
             await send_create_request(websocket, request_id, None, prompt_token_ids, sampling_params)
-            metric_store.log_request_sent(request_id, {
-                "prompt_text": None,
-                "prompt_token_ids": prompt_token_ids,
-                "sampling_params": sampling_params,
+            metric_store.log_request_sent(metric_id, {
+                "type": "init",
+                "length": len(prompt_token_ids),
             })
 
             # Receive response for n tokens
             print(f"Backtracking after {backtrack_per_token} tokens.")
             for _ in range(backtrack_per_token):
                 response = await websocket.recv()
+                metric_store.log_response_received(metric_id)
                 data = json.loads(response)
-                print(data)
                 token = data['outputs'][0]['token_ids'][-1]
-                print(f"Received token: {token}")
+                print(f"[{metric_id}] Received token: {token}")
                 prompt_token_ids.append(token)
                 if data['finished']:
                     return
 
             # Abort request
-            print(f"Aborting request with id: {request_id}")
+            print(f"[{metric_id}] Aborting request with id: {request_id}")
             await send_abort_request(websocket, request_id)
+            metric_store.log_request_sent(metric_id, {
+                "type": "abort",
+            })
 
             # Backtrack and splice tokens
             buffer_token_ids = prompt_token_ids[:-backtrack_len]
-            print(f"Backtracked {backtrack_len} tokens. Length = {len(buffer_token_ids)}")
             buffer_token_ids += [get_rand_token() for _ in range(splice_len)]
-            print(f"Spliced {splice_len} tokens. Length = {len(buffer_token_ids)}")
+            print(f"[{metric_id}] Spliced {splice_len} tokens. Length = {len(buffer_token_ids)}")
 
         if cur_request_id is not None:
             await send_abort_request(websocket, cur_request_id)
+            metric_store.log_request_sent(metric_id, {
+                "type": "abort",
+            })
 
 
 async def send_requests_in_batch(uri, requests: List[Dict]):
@@ -155,6 +164,14 @@ async def connect_to_server(args):
         requests = [request]
 
     await send_requests_in_batch(uri, requests)
+    metrics = metric_store.get_metrics()
+    print(metrics)
+    if output_metric_path := args.output_metric:
+        with open(output_metric_path, "w") as f:
+            json.dump(metrics, f)
+            print(f"Saved metric to file {output_metric_path}")
+        pass
+
     return
 
 
@@ -172,6 +189,9 @@ def parse_args():
     # Group 2: Specify the path to the JSON file containing list of request parameters
     parser.add_argument("--file", type=str,
                         help="Path to JSON file containing list of request parameters")
+
+    # Group 3: Output metric
+    parser.add_argument('--output_metric', type=str, help='Path to the metric output.')
     args = parser.parse_args()
     print(args)
     return args

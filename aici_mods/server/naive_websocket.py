@@ -96,6 +96,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
                     assert isinstance(generator, AsyncStream) or generator is None
                     if generator is None:
                         print(f"Generator is None for request_id: {request_id}")
+                        active_sequences.pop(request_id, None)
                         continue
 
                     if not generator.is_ready():
@@ -121,9 +122,10 @@ async def websocket_session(websocket: fastapi.WebSocket):
                             continue
 
                         print(f"Sending response for request_id: {request_id} -> {response}")
-                        # TODO: Only send the prefix, not the whole stuff.
                         outputs = response.outputs
                         outputs_ = [asdict(i) for i in outputs]
+                        # TODO: Only send the output token, not the whole stuff.
+
                         await websocket.send_json(dict(
                             request_id=request_id,
                             outputs=outputs_,
