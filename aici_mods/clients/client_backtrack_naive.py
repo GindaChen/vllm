@@ -30,12 +30,17 @@ class MetricStore:
 
     def _initialize(self):
         self.metrics = {}
+        self.metric_metadata = {}
+
+    def register_request(self, request_id: str, metadata: Dict):
+        self.metric_metadata[request_id] = metadata
+        pass
 
     def log_request_sent(self, request_id: str, metadata: Dict):
         if request_id not in self.metrics:
             self.metrics[request_id] = []
         self.metrics[request_id].append({
-            'event': 'send', 'metadata': metadata, 'time': time.time()
+            'event': 'send', 'time': time.time(), 'metadata': metadata
         })
 
     def log_response_received(self, request_id: str):
@@ -90,6 +95,13 @@ async def control_loop(uri, base_prompt_len, backtrack_per_token, backtrack_len,
         cur_request_id = None
 
         metric_id = f"{uuid.uuid4()}"
+        metric_store.register_request(metric_id, dict(
+            base_prompt_len=base_prompt_len,
+            backtrack_per_token=backtrack_per_token,
+            backtrack_len=backtrack_len,
+            splice_len=splice_len,
+            max_tokens=max_tokens,
+        ))
 
         while len(prompt_token_ids) <= max_tokens:
             request_id = f"bt-req-{uuid.uuid4()}"
@@ -99,7 +111,7 @@ async def control_loop(uri, base_prompt_len, backtrack_per_token, backtrack_len,
             print(f"Creating request with id: {request_id}. Length = {len(prompt_token_ids)}")
             await send_create_request(websocket, request_id, None, prompt_token_ids, sampling_params)
             metric_store.log_request_sent(metric_id, {
-                "type": "init",
+                "type": "create",
                 "length": len(prompt_token_ids),
             })
 
@@ -167,7 +179,7 @@ async def connect_to_server(args):
     metrics = metric_store.get_metrics()
     print(metrics)
     if output_metric_path := args.output_metric:
-        with open(output_metric_path, "w") as f:
+        with open(output_metric_path, "w+") as f:
             json.dump(metrics, f)
             print(f"Saved metric to file {output_metric_path}")
         pass
