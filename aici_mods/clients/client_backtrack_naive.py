@@ -52,6 +52,33 @@ class MetricStore:
     def get_metrics(self) -> Dict[str, Dict]:
         return self.metrics
 
+    def get_stats(self):
+        # Return statistics for the metrics
+        # - e2e: end to end time
+        # - itl: inter token latency
+
+        stats = {}
+
+        for request_id, events in self.metrics.items():
+            metadata = self.metric_metadata[request_id]
+            e2e = events[-1]['time'] - events[0]['time']
+            # Calculate the time between event: send - recv, recv - recv
+            itl_events = [
+                event for i, event in enumerate(events)
+                if i == 0 or event['event'] == 'recv'
+            ]
+            itl_N = len(itl_events) - 1
+            itl = sum(
+                itl_events[i + 1]['time'] - itl_events[i]['time']
+                for i in range(itl_N)
+            ) / (itl_N)
+            stats[request_id] = {
+                'e2e': e2e,
+                'itl': itl,
+                **metadata
+            }
+        return stats
+
 
 async def send_create_request(websocket, request_id, prompt_text, prompt_token_ids, sampling_params):
     request = {
@@ -177,12 +204,13 @@ async def connect_to_server(args):
 
     await send_requests_in_batch(uri, requests)
     metrics = metric_store.get_metrics()
-    print(metrics)
+    stats = metric_store.get_stats()
+    print(stats)
     if output_metric_path := args.output_metric:
         with open(output_metric_path, "w+") as f:
             json.dump({
                 "metric_metadata": metric_store.metric_metadata,
-                "metrics": metrics
+                "metrics": metrics,
             }, f)
             print(f"Saved metric to file {output_metric_path}")
         pass
