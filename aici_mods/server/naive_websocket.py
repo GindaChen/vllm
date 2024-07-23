@@ -6,6 +6,7 @@ import fastapi
 
 from vllm import AsyncLLMEngine
 from vllm.engine.async_llm_engine import AsyncStream
+from vllm.engine.async_llm_engine import AsyncStream
 from vllm.entrypoints.openai import api_server as openai_api_server_module
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.sampling_params import SamplingParams
@@ -22,9 +23,12 @@ def AsyncStream__is_ready(self: AsyncStream):
 
 
 def AsyncStream__get(self: AsyncStream):
-    assert AsyncStream__is_ready(self)
+    assert self.is_ready()
     return self._queue.get_nowait()
 
+
+AsyncStream.is_ready = AsyncStream__is_ready
+AsyncStream.get = AsyncStream__get
 
 
 # TODO: Refactor the data structure used for requests.
@@ -36,14 +40,18 @@ async def websocket_session(websocket: fastapi.WebSocket):
 
     # TODO: Refactor this logic into a class?
     async def handle_data():
+
         engine: AsyncLLMEngine = get_engine()
         try:
             while True:
+                # await asyncio.sleep(0.01)
                 data = await websocket.receive_json()
                 print(f"Received data: {data}")
                 action = data['action']
                 kwargs = data['kwargs']
                 print(f"Action: {action}, kwargs: {kwargs}")
+
+                print(f"{active_sequences = }")
 
                 if action == 'create':
                     request_id = kwargs['request_id']
@@ -57,24 +65,20 @@ async def websocket_session(websocket: fastapi.WebSocket):
                     )
 
                     generator: 'AsyncStream' = await engine.add_request(
-                        request_id,
-                        {
+                        request_id, {
                             'prompt': prompt_text,
                             'prompt_token_ids': prompt_token_ids,
                         },
                         sampling_params,
                     )
 
-                    async with active_sequences_lock:
-                        active_sequences[request_id] = generator
+                    # async with active_sequences_lock:
+                    active_sequences[request_id] = generator
 
                 elif action == 'abort':
                     request_id = kwargs['request_id']
                     await engine.abort(request_id)
-                    if request_id in active_sequences:
-                        async with active_sequences_lock:
-                            if request_id in active_sequences:
-                                del active_sequences[request_id]
+                    active_sequences.pop(request_id, None)
                     print(f"Aborted request_id: {request_id}")
 
         except fastapi.WebSocketDisconnect:
@@ -84,8 +88,7 @@ async def websocket_session(websocket: fastapi.WebSocket):
         try:
             while True:
                 to_delete = []
-                async with active_sequences_lock:
-                    keys = active_sequences.keys()
+                keys = active_sequences.keys()
 
                 for request_id in keys:
                     generator: AsyncStream = active_sequences.get(request_id, None)
@@ -95,44 +98,44 @@ async def websocket_session(websocket: fastapi.WebSocket):
                         print(f"Generator is None for request_id: {request_id}")
                         continue
 
-                    if not AsyncStream__is_ready(generator):
+                    if not generator.is_ready():
                         continue
 
-                    print(f"Generator is ready for request_id: {request_id}")
-                    try:
-                        response = AsyncStream__get(generator)
-                    except Exception as e:
-                        print(f"Request finished generation: {request_id =}, or with exception: {e}")
-                        # Delete the handler
-                        to_delete.append(request_id)
-                        # Send the abort message
+                    print(f"Handle send_responses for request_id: {request_id}")
+
+                    if generator.is_ready():
+                        print(f"Generator is ready for request_id: {request_id}")
+                        try:
+                            response = generator.get()
+                        except Exception as e:
+                            print(f"Request finished generation: {request_id =}, or with exception: {e}")
+                            # Delete the handler
+                            to_delete.append(request_id)
+                            # Send the abort message
+                            await websocket.send_json(dict(
+                                request_id=request_id,
+                                outputs=None,
+                                finished=True,
+                                metrics={},
+                            ))
+                            continue
+
+                        print(f"Sending response for request_id: {request_id} -> {response}")
+                        # TODO: Only send the prefix, not the whole stuff.
+                        outputs = response.outputs
+                        outputs_ = [asdict(i) for i in outputs]
                         await websocket.send_json(dict(
                             request_id=request_id,
-                            outputs=None,
-                            finished=True,
-                            metrics={},
+                            outputs=outputs_,
+                            finished=response.finished,
+                            metrics=asdict(response.metrics),
                         ))
-                        continue
-
-                    print(f"Sending response for request_id: {request_id} -> {response}")
-                    # TODO: Only send the prefix, not the whole stuff.
-                    outputs = response.outputs
-                    outputs_ = [asdict(i) for i in outputs]
-                    await websocket.send_json(dict(
-                        request_id=request_id,
-                        outputs=outputs_,
-                        finished=response.finished,
-                        metrics=asdict(response.metrics),
-                    ))
-                    print(f"Sent response for request_id: {request_id}")
+                        print(f"Sent response for request_id: {request_id}")
 
                 for request_id in to_delete:
-                    async with active_sequences_lock:
-                        if request_id in active_sequences:
-                            del active_sequences[request_id]
-                            print(f"Deleted request_id: {request_id}")
+                    active_sequences.pop(request_id, None)
 
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.01)
 
         except fastapi.WebSocketDisconnect:
             return
