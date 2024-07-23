@@ -205,7 +205,7 @@ async def connect_to_server(args):
     await send_requests_in_batch(uri, requests)
     metrics = metric_store.get_metrics()
     stats = metric_store.get_stats()
-    print(stats)
+
     if output_metric_path := args.output_metric:
         with open(output_metric_path, "w+") as f:
             json.dump({
@@ -213,6 +213,13 @@ async def connect_to_server(args):
                 "metrics": metrics,
             }, f)
             print(f"Saved metric to file {output_metric_path}")
+        pass
+
+    print(stats)
+    if output_metric_stat_path := args.output_metric_stat:
+        with open(output_metric_stat_path, "w+") as f:
+            json.dump(stats, f)
+            print(f"Saved metric stat to file {output_metric_stat_path}")
         pass
 
     return
@@ -235,6 +242,7 @@ def parse_args():
 
     # Group 3: Output metric
     parser.add_argument('--output_metric', type=str, help='Path to the metric output.')
+    parser.add_argument('--output_metric_stat', type=str, help='Path to the metric stat output.')
     args = parser.parse_args()
     print(args)
     return args
