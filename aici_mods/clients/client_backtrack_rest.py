@@ -8,7 +8,7 @@ import argparse
 import json
 import random
 import time
-from typing import Iterable, List, Union
+from typing import Dict, Iterable, List, Union
 
 import requests
 
@@ -74,6 +74,8 @@ if __name__ == "__main__":
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--max_tokens", type=int, default=16)
     args = parser.parse_args()
+
+    get_token = lambda: random.randint(20, 4096)
     prompt_ids = args.prompt_ids
     prompt_ids = eval(prompt_ids)
 
@@ -92,9 +94,9 @@ if __name__ == "__main__":
     backtrack_len = 5
     splice_len = 10
 
-    get_token = lambda: random.randint(20, 4096)
 
     while len(prompt_ids) < max_tokens:
+        print(f"{len(prompt_ids)!r}\n", flush=True)
         response = post_http_request(prompt_ids, api_url, n, stream, max_tokens)
         num_printed_lines = 0
 
