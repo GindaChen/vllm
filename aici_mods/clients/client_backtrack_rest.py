@@ -63,9 +63,18 @@ def get_token():
     return random.randint(20, 4096)
 
 
-def generate_tokens(prompt_ids: List[int], api_url: str, stream: bool, max_tokens: int,
-                    backtrack_per_token: int, backtrack_len: int, splice_len: int) -> None:
+def generate_tokens(
+    api_url: str, stream: bool,
+    base_prompt_len: int = 0,
+    max_tokens: int = 0,
+    backtrack_per_token: int = 0,
+    backtrack_len: int = 0,
+    splice_len: int = 0
+) -> None:
     start = time.time()
+    assert splice_len > backtrack_len
+
+    prompt_ids = [get_token() for _ in range(base_prompt_len)]
 
     while len(prompt_ids) < max_tokens:
         print(f"{len(prompt_ids)!r}\n", flush=True)
@@ -100,28 +109,44 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--n", type=int, default=4)
-    parser.add_argument("--prompt_ids", type=str, default="")
     parser.add_argument("--stream", action="store_true")
+
+    # Group 1: Single request
     parser.add_argument("--max_tokens", type=int, default=16)
     parser.add_argument("--base_prompt_len", type=int, default=128)
     parser.add_argument("--backtrack_per_token", type=int, default=5)
     parser.add_argument("--backtrack_len", type=int, default=5)
     parser.add_argument("--splice_len", type=int, default=10)
-    args = parser.parse_args()
 
-    prompt_ids = args.prompt_ids
-    prompt_ids = eval(prompt_ids)
+    # Group 2: File-based request
+    parser.add_argument("--file", type=str, help="Path to JSON file containing list of request parameters")
+    args = parser.parse_args()
 
     api_url = f"http://{args.host}:{args.port}/v1/completions"
     n = args.n
+    file = args.file
     stream = args.stream
-    max_tokens = args.max_tokens
-    base_prompt_len = args.base_prompt_len
-    backtrack_per_token = args.backtrack_per_token
-    backtrack_len = args.backtrack_len
-    splice_len = args.splice_len
     assert stream
 
-    print(f"prompt_ids: {prompt_ids!r}\n", flush=True)
+    #
+    if file:
+        with open(file, "r") as file:
+            rs = json.load(file)
+        pass
+    else:
+        rs = [
+            dict(
+                base_prompt_len=args.base_prompt_len,
+                backtrack_per_token=args.backtrack_per_token,
+                backtrack_len=args.backtrack_len,
+                splice_len=args.splice_len,
+                max_tokens=args.max_tokens,
+            )
+        ]
 
-    generate_tokens(prompt_ids, api_url, stream, max_tokens, backtrack_per_token, backtrack_len, splice_len)
+    # TODO: Make it parallel, likely using async or something else.
+    #  Thread is also okay
+    for r in rs:
+        generate_tokens(
+            api_url, stream, **r
+        )
