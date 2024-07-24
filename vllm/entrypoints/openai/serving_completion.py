@@ -291,6 +291,7 @@ class OpenAIServingCompletion(OpenAIServing):
                                 logprobs=logprobs,
                                 finish_reason=finish_reason,
                                 stop_reason=stop_reason,
+                                token=delta_token_ids[-1],
                             )
                         ])
                     if (request.stream_options
