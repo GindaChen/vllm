@@ -11,6 +11,10 @@ from typing import Dict, List, Union, AsyncGenerator
 
 import aiohttp
 
+from utils.metric import MetricStore
+
+metric_store = MetricStore()
+
 
 def clear_line(n: int = 1) -> None:
     LINE_UP = '\033[1A'
@@ -70,10 +74,22 @@ async def generate_tokens(
 
     prompt_ids = [get_token() for _ in range(base_prompt_len)]
 
+    metric_store.register_request(metric_id, dict(
+        base_prompt_len=base_prompt_len,
+        backtrack_per_token=backtrack_per_token,
+        backtrack_len=backtrack_len,
+        splice_len=splice_len,
+        max_tokens=max_tokens,
+    ))
+
     async with aiohttp.ClientSession() as session:
         while len(prompt_ids) < max_tokens:
             print(f"{len(prompt_ids)!r}\n", flush=True)
             response = await post_http_request(session, prompt_ids, api_url, stream, max_tokens, model=model)
+            metric_store.log_request_sent(metric_id, {
+                "type": "create",
+                "length": len(prompt_ids),
+            })
             num_printed_lines = 0
 
             # Forward `backtrack_per_token` tokens
@@ -84,6 +100,7 @@ async def generate_tokens(
                 token = h['choices'][0]['token']
                 prompt_ids.append(token)
                 print(f"[{metric_id}] {token = }")
+                metric_store.log_response_received(metric_id)
                 i += 1
                 if i >= backtrack_per_token:
                     break
@@ -124,6 +141,26 @@ async def main(args):
     tasks = [generate_tokens(api_url, stream, model=model, **r) for r in rs]
     await asyncio.gather(*tasks)
 
+    metrics = metric_store.get_metrics()
+    stats = metric_store.get_stats()
+
+    if output_metric_path := args.output_metric:
+        with open(output_metric_path, "w+") as f:
+            json.dump({
+                "metric_metadata": metric_store.metric_metadata,
+                "metrics": metrics,
+            }, f)
+            print(f"Saved metric to file {output_metric_path}")
+        pass
+
+    print(stats)
+    if output_metric_stat_path := args.output_metric_stat:
+        with open(output_metric_stat_path, "w+") as f:
+            json.dump(stats, f)
+            print(f"Saved metric stat to file {output_metric_stat_path}")
+        pass
+    return
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -139,13 +176,16 @@ if __name__ == "__main__":
     parser.add_argument("--backtrack_per_token", type=int, default=5)
     parser.add_argument("--backtrack_len", type=int, default=5)
     parser.add_argument("--splice_len", type=int, default=10)
+
     # Group 2: File-based request
     parser.add_argument("--file", type=str,
                         help="Path to JSON file containing list of request parameters")
 
     # Group 3: Output metric
-    # parser.add_argument("--output_metric", type=str,
-    #                     help="Path to store the metrics")
+    parser.add_argument("--output_metric", type=str,
+                        help="Path to store the metrics")
+    parser.add_argument("--output_metric_stat", type=str,
+                        help="Path to store the metric stats")
 
     args = parser.parse_args()
 
