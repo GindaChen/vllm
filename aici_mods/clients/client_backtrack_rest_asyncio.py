@@ -1,5 +1,5 @@
 """
-python client_backtrack_rest_asyncio.py --stream --max_tokens 200 --base_prompt_len 128 --backtrack_per_token 5 --backtrack_len 5 --splice_len 10
+python client_backtrack_rest_asyncio.py --stream --file task_backtrack_1.json --output_metric metric.task_backtrack_1.json --output_metric_stat metric_stat.task_backtrack_1.json
 """
 import argparse
 import asyncio
@@ -122,7 +122,7 @@ async def main(args):
     file = args.file
     stream = args.stream
     model = args.model
-    assert stream
+    assert stream is True
 
     if file:
         with open(file, "r") as file:

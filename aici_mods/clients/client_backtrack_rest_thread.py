@@ -1,10 +1,6 @@
-"""Example Python client for `vllm.entrypoints.api_server`
-NOTE: The API server is used only for demonstration and simple performance
-benchmarks. It is not intended for production use.
-For production use, we recommend `vllm serve` and the OpenAI client API.
-
-NOTE:
-python client_backtrack_rest.py --stream --prompt_ids '[random.randint(20, 4096) for _ in range(128)]' --max_tokens 200 --base_prompt_len 128 --backtrack_per_token 5 --backtrack_len 5 --splice_len 10
+"""
+Usage:
+python client_backtrack_rest_thread.py --file task_backtrack_1.json
 """
 
 import argparse
