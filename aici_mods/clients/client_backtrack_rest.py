@@ -6,6 +6,7 @@ For production use, we recommend `vllm serve` and the OpenAI client API.
 
 import argparse
 import json
+import random
 import time
 from typing import Iterable, List, Union
 
@@ -23,7 +24,7 @@ def post_http_request(prompt: Union[str, List[int]],
                       api_url: str,
                       n: int = 1,
                       stream: bool = False,
-                      max_tokens:int = 16) -> requests.Response:
+                      max_tokens: int = 16) -> requests.Response:
     headers = {"User-Agent": "Test Client"}
     pload = {
         "model": "facebook/opt-125m",
@@ -37,7 +38,7 @@ def post_http_request(prompt: Union[str, List[int]],
     return response
 
 
-def get_streaming_response(response: requests.Response) -> Iterable[List[str]]:
+def get_streaming_response(response: requests.Response) -> Iterable[Dict]:
     for chunk in response.iter_lines(chunk_size=8192,
                                      decode_unicode=False,
                                      delimiter=b"\n"):
@@ -47,7 +48,10 @@ def get_streaming_response(response: requests.Response) -> Iterable[List[str]]:
         # h = b'data: [DONE]'
         if b"[DONE]" in chunk:
             return
-        # h = b'data: {"id":"cmpl-a52c27c28d9f4a4dac20e164e7863089","object":"text_completion","created":1721795130,"model":"facebook/opt-125m","choices":[{"index":0,"text":" a","token":10,"logprobs":null,"finish_reason":null,"stop_reason":null}],"usage":null}'
+        # h = b'data: {"id":"cmpl-a52c27c28d9f4a4dac20e164e7863089",
+        # "object":"text_completion","created":1721795130,"model":"facebook/opt-125m",
+        # "choices":[{"index":0,"text":" a","token":10,"logprobs":null,"finish_reason":null,
+        # "stop_reason":null}],"usage":null}'
 
         # strip the `data: ` prefix
         chunk = chunk[6:]
@@ -66,21 +70,12 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--n", type=int, default=4)
-    parser.add_argument("--prompt", type=str, default="")
     parser.add_argument("--prompt_ids", type=str, default="")
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--max_tokens", type=int, default=16)
     args = parser.parse_args()
-
-    prompt = args.prompt
     prompt_ids = args.prompt_ids
-    if not prompt and not prompt_ids:
-        raise ValueError("Please provide either `prompt` or `prompt_ids`.")
-    if prompt and prompt_ids:
-        raise ValueError("Please provide only one of `prompt` or `prompt_ids`.")
-    if prompt_ids and not prompt:
-        prompt_ids = eval(prompt_ids)
-        prompt = None
+    prompt_ids = eval(prompt_ids)
 
     api_url = f"http://{args.host}:{args.port}/v1/completions"
     n = args.n
@@ -88,27 +83,39 @@ if __name__ == "__main__":
     max_tokens = args.max_tokens
     assert stream
 
-    print(f"Prompt: {prompt!r}\n", flush=True)
     print(f"prompt_ids: {prompt_ids!r}\n", flush=True)
 
-    current_text_chunk = [prompt]
     start = time.time()
 
-    base_prompt_len = 0
+    base_prompt_len = len(prompt_ids)
     backtrack_per_token = 5
     backtrack_len = 5
     splice_len = 10
 
-    # while True:
-    response = post_http_request(prompt or prompt_ids, api_url, n, stream, max_tokens)
-    num_printed_lines = 0
-    i = 0
-    for h in get_streaming_response(response):
-        clear_line(num_printed_lines)
-        num_printed_lines = 0
-        token = h['choices'][0]['token']
-        print(f"{token = }")
+    get_token = lambda: random.randint(20, 4096)
 
+    while len(prompt_ids) < max_tokens:
+        response = post_http_request(prompt_ids, api_url, n, stream, max_tokens)
+        num_printed_lines = 0
+
+        # Forward `backtrack_per_token` tokens
+        i = 0
+        for h in get_streaming_response(response):
+            clear_line(num_printed_lines)
+            num_printed_lines = 0
+            token = h['choices'][0]['token']
+            prompt_ids.append(token)
+            print(f"{token = }")
+            i += 1
+            if i >= backtrack_per_token:
+                break
+
+        # Abort the request so vLLM knows to stop
+        response.close()
+
+        # Backtrack a few tokens, and add a few splice tokens
+        prompt_ids = prompt_ids[:-backtrack_len]
+        prompt_ids += [get_token() for _ in range(splice_len)]
 
     end = time.time()
     print(f"Time taken: {end - start:.2f}s")
