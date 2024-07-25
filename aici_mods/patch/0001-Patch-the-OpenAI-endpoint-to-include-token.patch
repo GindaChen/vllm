@@ -1,0 +1,37 @@
+From 5f0441050f0402d97b53a65d10102e2136182305 Mon Sep 17 00:00:00 2001
+From: GindaChen <32371474+GindaChen@users.noreply.github.com>
+Date: Tue, 23 Jul 2024 17:37:28 -0700
+Subject: [PATCH] Patch the OpenAI endpoint to include token
+
+---
+ vllm/entrypoints/openai/protocol.py           | 1 +
+ vllm/entrypoints/openai/serving_completion.py | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/vllm/entrypoints/openai/protocol.py b/vllm/entrypoints/openai/protocol.py
+index 2faf0611..6101e2a2 100644
+--- a/vllm/entrypoints/openai/protocol.py
++++ b/vllm/entrypoints/openai/protocol.py
+@@ -579,6 +579,7 @@ class CompletionResponse(OpenAIBaseModel):
+ class CompletionResponseStreamChoice(OpenAIBaseModel):
+     index: int
+     text: str
++    token: int
+     logprobs: Optional[CompletionLogProbs] = None
+     finish_reason: Optional[str] = None
+     stop_reason: Optional[Union[int, str]] = Field(
+diff --git a/vllm/entrypoints/openai/serving_completion.py b/vllm/entrypoints/openai/serving_completion.py
+index e61f3fdb..a17f7a9d 100644
+--- a/vllm/entrypoints/openai/serving_completion.py
++++ b/vllm/entrypoints/openai/serving_completion.py
+@@ -291,6 +291,7 @@ class OpenAIServingCompletion(OpenAIServing):
+                                 logprobs=logprobs,
+                                 finish_reason=finish_reason,
+                                 stop_reason=stop_reason,
++                                token=delta_token_ids[-1],
+                             )
+                         ])
+                     if (request.stream_options
+-- 
+2.44.0
+
