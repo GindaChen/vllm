@@ -630,7 +630,7 @@ class WorkerWrapperBase:
             logger.debug_learning(f"Worker {self.rpc_rank} received message: {message}")
 
             # Send a response back to the client
-            self.kv_transfer_server.send(b"OK from worker {} at port {}".format(self.rpc_rank, self.kv_transfer_init_port))
+            self.kv_transfer_server.send(f"OK from worker {self.rpc_rank} at port {self.kv_transfer_init_port}".encode())
 
     def initialize_from_config(self, kv_cache_configs: List[Any]) -> None:
         kv_cache_config = kv_cache_configs[self.rpc_rank]
