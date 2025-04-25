@@ -198,12 +198,14 @@ class EngineCore:
 
         # Check for any requests remaining in the scheduler - unfinished,
         # or finished and not yet removed from the batch.
+        logger.debug_learning(f"In EngineCore.step: {self.scheduler.has_requests() = }")
         if not self.scheduler.has_requests():
             return EngineCoreOutputs(
                 outputs=[],
                 scheduler_stats=self.scheduler.make_stats(),
             )
         scheduler_output = self.scheduler.schedule()
+        logger.debug_learning(f"In EngineCore.step: {scheduler_output = }")
         output = self.model_executor.execute_model(scheduler_output)
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, output)  # type: ignore
@@ -305,6 +307,13 @@ class EngineCore:
                                                   kwargs)
 
 
+class EngineCoreProcInterface():
+
+    @staticmethod
+    def run_engine_core(*args, **kwargs):
+        raise NotImplementedError("This method should be implemented by the subclass.")
+
+
 class EngineCoreProc(EngineCore):
     """ZMQ-wrapper for running EngineCore in background process."""
 
@@ -396,6 +405,7 @@ class EngineCoreProc(EngineCore):
 
         # Loop until process is sent a SIGINT or SIGTERM
         while True:
+            logger.debug_learning(f"In EngineCore.run_busy_loop: {self.scheduler.has_requests() = }")
             # 1) Poll the input queue until there is work to do.
             self._process_input_queue()
             # 2) Step the engine core and return the outputs.

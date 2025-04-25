@@ -63,6 +63,18 @@ def _print_warning_once(logger: Logger, msg: str) -> None:
     logger.warning(msg, stacklevel=2)
 
 
+def _print_debug_metric(logger: Logger, msg: str) -> None:
+    """Print metric for only debugging purposes. This helps un-polluting the log space."""
+    msg = f"\033[92m{msg}\033[0m"
+    logger.info(msg, stacklevel=2)
+
+
+def _print_debug_learning(logger: Logger, msg: str) -> None:
+    """Print debug learning for only debugging purposes. This helps un-polluting the log space."""
+    msg = f"\033[95m{msg}\033[0m"
+    logger.info(msg, stacklevel=2)
+
+
 class _VllmLogger(Logger):
     """
     Note:
@@ -132,6 +144,8 @@ def init_logger(name: str) -> _VllmLogger:
     methods_to_patch = {
         "info_once": _print_info_once,
         "warning_once": _print_warning_once,
+        "debug_metric": _print_debug_metric,
+        "debug_learning": _print_debug_learning,
     }
 
     for method_name, method in methods_to_patch.items():

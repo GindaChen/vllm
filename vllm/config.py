@@ -1842,6 +1842,9 @@ class SchedulerConfig:
     # or "mod.custom_class".
     scheduler_cls: Union[str, type[object]] = "vllm.core.scheduler.Scheduler"
 
+    # target class for the core engine process
+    engine_core_cls: Optional[str] = None
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,

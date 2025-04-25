@@ -270,13 +270,22 @@ class CoreEngine:
     ):
         self.index = index
         self.identity = index.to_bytes(length=2, byteorder="little")
+        
+        # Unnecessary, but adding it for fun.
+        from vllm.utils import resolve_obj_by_qualname
+        engine_core_cls = vllm_config.scheduler_config.engine_core_cls
+        if engine_core_cls is None:
+            engine_core_cls = "vllm.v1.engine.core.EngineCoreProc"
+        engine_core_cls = resolve_obj_by_qualname(engine_core_cls)
+        target_fn = engine_core_cls.run_engine_core
+
         try:
             # Start EngineCore in background process.
             self.proc_handle = BackgroundProcHandle(
                 input_path=input_path,
                 output_path=output_path,
                 process_name=f"EngineCore_{index}",
-                target_fn=EngineCoreProc.run_engine_core,
+                target_fn=target_fn,
                 process_kwargs={
                     "vllm_config": vllm_config,
                     "dp_rank": index,

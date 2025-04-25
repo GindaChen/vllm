@@ -28,7 +28,9 @@ from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
 
 logger = init_logger(__name__)
-
+# print(f"Initializing scheduler {__name__}")
+# logger.warning(f"Initializing scheduler {__name__} - print with logger")
+# logger.info(f"Initializing scheduler {__name__} - print with logger")
 
 class Scheduler(SchedulerInterface):
 
@@ -162,6 +164,7 @@ class Scheduler(SchedulerInterface):
             request = self.running[req_index]
             if request.request_id in self.scheduled_req_ids:
                 # This request has already been scheduled.
+                logger.debug_learning(f"Request {request.request_id} already scheduled, skipping.")
                 req_index += 1
                 continue
 
@@ -187,6 +190,8 @@ class Scheduler(SchedulerInterface):
                     # we intentionally relax the strict FCFS scheduling policy
                     # to allow lower-priority requests to be scheduled when a
                     # higher-priority request is blocked by encoder constraints.
+                    logger.debug_learning(f"Request {request.request_id} cannot be scheduled due to encoder constraints.")
+
                     req_index += 1
                     continue
             else:
@@ -211,6 +216,7 @@ class Scheduler(SchedulerInterface):
 
                     self.waiting.appendleft(preempted_req)
                     preempted_reqs.append(preempted_req)
+                    logger.debug_learning(f"Preempted request {preempted_req.request_id} to schedule {request.request_id}.")
                     if preempted_req == request:
                         # No more request to preempt.
                         can_schedule = False
@@ -218,8 +224,10 @@ class Scheduler(SchedulerInterface):
                 else:
                     # The request can be scheduled.
                     can_schedule = True
+                    logger.debug_learning(f"Request {request.request_id} can be scheduled with new blocks.")
                     break
             if not can_schedule:
+                logger.debug_learning(f"Request {request.request_id} cannot be scheduled, breaking loop.")
                 break
             assert new_blocks is not None
 
@@ -266,6 +274,7 @@ class Scheduler(SchedulerInterface):
                 req.lora_request.lora_int_id for req in scheduled_running_reqs
                 if req.lora_request and req.lora_request.lora_int_id > 0)
             assert len(scheduled_loras) <= self.lora_config.max_loras
+            logger.debug_learning(f"Scheduled LoRAs: {scheduled_loras}")
 
         # Use a temporary deque to collect requests that need to be skipped
         # and put back at the head of the waiting queue later
@@ -275,9 +284,11 @@ class Scheduler(SchedulerInterface):
         if not preempted_reqs:
             while self.waiting and token_budget > 0:
                 if len(self.running) == self.max_num_running_reqs:
+                    logger.debug_learning("Max number of running requests reached, breaking.")
                     break
 
                 request = self.waiting[0]
+                logger.debug_learning(f"Try to schedule request {request.request_id} with status {request.status}.")
 
                 # Skip request if the structured output request is still waiting
                 # for FSM compilation.
@@ -288,6 +299,7 @@ class Scheduler(SchedulerInterface):
                     else:
                         self.waiting.popleft()
                         skipped_waiting_requests.appendleft(request)
+                        logger.debug_learning(f"Skipping request {request.request_id} due to FSM compilation.")
                         continue
 
                 # Check that adding the request still respects the max_loras
@@ -299,6 +311,7 @@ class Scheduler(SchedulerInterface):
                     # Scheduling would exceed max_loras, skip.
                     self.waiting.popleft()
                     skipped_waiting_requests.appendleft(request)
+                    logger.debug_learning(f"Skipping request {request.request_id} due to max_loras constraint.")
                     continue
 
                 # Get already-cached tokens.
@@ -324,6 +337,7 @@ class Scheduler(SchedulerInterface):
                          encoder_budget)
                     if num_new_tokens == 0:
                         # The request cannot be scheduled.
+                        logger.debug_learning(f"Request {request.request_id} cannot be scheduled due to encoder constraints.")
                         break
                 else:
                     encoder_inputs_to_schedule = None
@@ -333,6 +347,7 @@ class Scheduler(SchedulerInterface):
                     request, num_new_tokens, computed_blocks)
                 if new_blocks is None:
                     # The request cannot be scheduled.
+                    logger.debug_learning(f"Request {request.request_id} cannot be scheduled due to lack of cache slots.")
                     break
 
                 self.waiting.popleft()
@@ -375,6 +390,7 @@ class Scheduler(SchedulerInterface):
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
             self.waiting.extendleft(skipped_waiting_requests)
+            logger.debug_learning(f"Re-queued skipped requests: {[req.request_id for req in skipped_waiting_requests]}")
 
         # Check if the scheduling constraints are satisfied.
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
@@ -456,6 +472,7 @@ class Scheduler(SchedulerInterface):
             self.requests[req_id].num_computed_tokens += num_scheduled_token
 
         self.finished_req_ids = set()
+        logger.debug_learning("Scheduler output constructed and returned.")
         return scheduler_output
 
     def _make_cached_request_data(
@@ -777,3 +794,127 @@ class Scheduler(SchedulerInterface):
         spec_decoding_stats.observe(num_draft_tokens=num_draft_tokens,
                                     num_accepted_tokens=num_accepted_tokens)
         return spec_decoding_stats
+
+
+
+class PrefillScheduler(Scheduler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        logger.debug_learning(f"Initializing PrefillScheduler")
+        
+        # Requests that finished prefill and waiting for migration (to release the KV cache)
+        self.finished_requests: list[Request] = []
+
+        # -----------------------------------------------------------
+        # Highlight of important data structures in the parent class:
+        # -----------------------------------------------------------
+        # # The request IDs that are finished in between the previous and the
+        # # current steps. This is used to notify the workers about the finished
+        # # requests so that they can free the cached states for those requests.
+        # # This is flushed at the end of each scheduling step.
+        # self.finished_req_ids: set[str] = set()
+
+    def add_request(self, request: Request) -> None:
+        request.max_tokens = 1
+        logger.debug_learning(f"Added request {request.request_id} to prefill scheduler: {request.max_tokens = }")
+        return super().add_request(request)
+
+    def schedule(self) -> SchedulerOutput:
+        logger.debug_learning(f"Scheduling requests")
+        return super().schedule()
+
+    def finish_requests(
+        self,
+        request_ids: Union[str, Iterable[str]],
+        finished_status: RequestStatus,
+    ) -> None:
+        """Handles the finish signal from outside the scheduler.
+
+        For example, the API server can abort a request when the client
+        disconnects.
+        """
+        logger.debug_learning(f"Finishing requests {request_ids}")
+        assert RequestStatus.is_finished(finished_status)
+        if isinstance(request_ids, str):
+            request_ids = (request_ids, )
+        else:
+            request_ids = set(request_ids)
+
+        for req_id in request_ids:
+            request = self.requests.get(req_id)
+            if request is None:
+                # Invalid request ID.
+                continue
+
+            if request.status == RequestStatus.RUNNING:
+                self.running.remove(request)
+            else:
+                self.waiting.remove(request)
+            request.status = finished_status
+            
+            # <<< 
+            # Different from the parent class, 
+            # we don't actively free the actual request resources here,
+            # but defer that decision to the function looking at `self.finished_requests`
+            # 
+            # self._free_request(request)
+            self.finished_requests.append(request)
+
+
+            self.finished_req_ids.add(request.request_id)
+
+            logger.debug_learning(f"Request {request.request_id} finished prefill and waiting for migration.")
+            # >>>
+
+    def _free_request(self, request: Request) -> None:
+        assert request.is_finished()
+        self.kv_cache_manager.free(request)
+        self.kv_cache_manager.free_block_hashes(request)
+        self.encoder_cache_manager.free(request)
+        self._cached_reqs_data.pop(request.request_id, None)
+        del self.requests[request.request_id]
+        
+
+    
+class DecodeScheduler(Scheduler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Requests that finished prefill and waiting for migration
+        self.unmigrated_requests: list[Request] = []
+
+    def add_request(self, request: Request) -> None:
+        logger.debug_learning(f"Adding request {request.request_id} to decode scheduler: {request.max_tokens = }. Remember you should submit a request with max_tokens = original max_tokens - 1.")
+        self.unmigrated_requests.append(request)
+
+
+    def has_unfinished_requests(self) -> bool:
+        a = super().has_unfinished_requests()
+        b = len(self.unmigrated_requests) > 0
+        return a or b
+
+    def schedule(self) -> SchedulerOutput:
+        if True and self.unmigrated_requests:
+            logger.debug_learning(f"Decode scheduler is still in debug mode - not really kv transfer happening just yet. Adding all unmigrated requests back to waiting queue: {self.unmigrated_requests = }")
+            self.waiting.extend(self.unmigrated_requests)
+            for request in self.unmigrated_requests:
+                self.requests[request.request_id] = request
+                if self.log_stats:
+                    request.record_event(EngineCoreEventType.QUEUED)
+            
+            self.unmigrated_requests = []
+            pass
+        return super().schedule()
+
+
+"""
+General comments about scheudler:
+It is not about the scheduler() function itself that is complex,
+    but the fact that we don't have a good "animation" about what has been
+    scheduled and all of the actions.
+We may want to have a better interface to connect this idea.
+
+TODO in engine core:
+- Ensure when eviction happens it is done safer. We should have a safer manner when the decode is above the watermark.
+"""

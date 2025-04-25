@@ -22,6 +22,7 @@ if not current_platform.is_tpu() and not current_platform.is_hpu():
 
 supports_moe_ops = False
 with contextlib.suppress(ImportError):
+    raise ImportError("HACK(DistServe): We don't want to import moe ops for now")
     import vllm._moe_C  # noqa: F401
     supports_moe_ops = True
 
