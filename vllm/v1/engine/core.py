@@ -41,6 +41,8 @@ from vllm.v1.structured_output import StructuredOutputManager
 from vllm.version import __version__ as VLLM_VERSION
 
 logger = init_logger(__name__)
+print("\033[92mInside core.py\033[0m")
+logger.debug_learning("Inside core.py")
 
 POLLING_TIMEOUT_S = 2.5
 
@@ -64,6 +66,7 @@ class EngineCore:
         self.log_stats = log_stats
 
         # Setup Model.
+        logger.debug_learning(f"Initializing Model Executor: {executor_class}")
         self.model_executor = executor_class(vllm_config)
 
         # Setup KV Caches and update CacheConfig after profiling.
@@ -327,6 +330,7 @@ class EngineCoreProc(EngineCore):
         engine_index: int = 0,
     ):
         super().__init__(vllm_config, executor_class, log_stats)
+        logger.debug_learning("Initializing EngineCoreProc")
 
         self.step_fn = (self.step if self.batch_queue is None else
                         self.step_with_batch_queue)
@@ -354,6 +358,8 @@ class EngineCoreProc(EngineCore):
                         local_dp_rank: int = 0,
                         **kwargs):
         """Launch EngineCore busy loop in background process."""
+
+        logger.debug_learning("Running EngineCoreProc")
 
         # Signal handler used for graceful termination.
         # SystemExit exception is only raised once to allow this and worker

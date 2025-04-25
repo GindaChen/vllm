@@ -217,6 +217,10 @@ class EngineArgs:
     reasoning_parser: Optional[str] = None
     use_tqdm_on_load: bool = LoadConfig.use_tqdm_on_load
 
+    # --- KV transfer configuration ---
+    kv_transfer_role: Optional[str] = None
+    kv_transfer_init_port_base: Optional[int] = None
+
     def __post_init__(self):
         if not self.tokenizer:
             self.tokenizer = self.model
@@ -1017,6 +1021,22 @@ class EngineArgs:
             "scheduled (like TTTTIIIII, leaving IIIII), it will be scheduled "
             "as TTTT in one step and IIIIIIIIII in the next.")
 
+        parser.add_argument(
+            "--kv-transfer-role",
+            type=str,
+            default=None,
+            help="The role of the worker for KV transfer. "
+            "If set, the worker will act as a KV transfer server."
+        )
+
+        parser.add_argument(
+            "--kv-transfer-init-port-base",
+            type=int,
+            default=None,
+            help="The base port number for the KV transfer. "
+            "Each worker will use this port number + its rank as its KV transfer port."
+        )
+
         return parser
 
     @classmethod
@@ -1273,6 +1293,9 @@ class EngineArgs:
             max_num_partial_prefills=self.max_num_partial_prefills,
             max_long_partial_prefills=self.max_long_partial_prefills,
             long_prefill_token_threshold=self.long_prefill_token_threshold,
+            # --- KV transfer configuration ---
+            kv_transfer_role=self.kv_transfer_role,
+            kv_transfer_init_port_base=self.kv_transfer_init_port_base,
         )
 
         lora_config = LoRAConfig(

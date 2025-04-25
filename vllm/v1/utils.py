@@ -115,6 +115,7 @@ class BackgroundProcHandle:
         self.proc: Process = context.Process(target=target_fn,
                                              kwargs=process_kwargs,
                                              name=process_name)
+        logger.debug_learning(f"Starting process: {self.proc.name}")
         self._finalizer = weakref.finalize(self, shutdown, self.proc,
                                            input_path, output_path)
         self.proc.start()

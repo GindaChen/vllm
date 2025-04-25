@@ -23,6 +23,7 @@ class UniProcExecutor(ExecutorBase):
     def _init_executor(self) -> None:
         """Initialize the worker and load the model.
         """
+        logger.debug_learning("Initializing UniProcExecutor")
         self.driver_worker = WorkerWrapperBase(vllm_config=self.vllm_config,
                                                rpc_rank=0)
         distributed_init_method = get_distributed_init_method(
@@ -42,9 +43,12 @@ class UniProcExecutor(ExecutorBase):
             is_driver_worker=(not self.parallel_config)
             or (rank % self.parallel_config.tensor_parallel_size == 0),
         )
+        logger.debug_learning(f"Initializing UniProcExecutor")
+        logger.debug_learning(f"Initialized driver worker: {self.driver_worker}")
         self.collective_rpc("init_worker", args=([kwargs], ))
         self.collective_rpc("init_device")
         self.collective_rpc("load_model")
+        logger.debug_learning("Finished UniProcExecutor")
 
     def collective_rpc(self,
                        method: Union[str, Callable],

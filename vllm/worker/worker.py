@@ -33,6 +33,8 @@ from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
 logger = init_logger(__name__)
+print("\033[92mInside worker.py\033[0m")
+logger.debug_learning("Inside worker.py")
 
 
 class Worker(LocalOrDistributedWorkerBase):
@@ -52,6 +54,7 @@ class Worker(LocalOrDistributedWorkerBase):
         is_driver_worker: bool = False,
         model_runner_cls: Optional[Type[GPUModelRunnerBase]] = None,
     ) -> None:
+        logger.debug_learning("Initializing worker")
         WorkerBase.__init__(self, vllm_config)
         self.parallel_config.rank = rank
         self.local_rank = local_rank
@@ -112,6 +115,20 @@ class Worker(LocalOrDistributedWorkerBase):
         else:
             self.profiler = None
 
+
+        scheduler_config = vllm_config.scheduler_config
+
+        logger.debug_learning(f"Scheduler config: {scheduler_config.kv_transfer_role}")
+        if scheduler_config.kv_transfer_role is not None:
+            self.kv_transfer_role = scheduler_config.kv_transfer_role
+            self.kv_transfer_init_port = scheduler_config.kv_transfer_init_port_base + rank
+
+
+            logger.debug_learning(
+                f"Worker {self.rank} (role = {self.kv_transfer_role}) with KV transfer init port {self.kv_transfer_init_port}"
+            )
+        
+
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
@@ -140,6 +157,7 @@ class Worker(LocalOrDistributedWorkerBase):
         allocator.wake_up(tags=tags)
 
     def init_device(self) -> None:
+        logger.debug_learning("Initializing device")
         if self.device_config.device.type == "cuda":
             # torch.distributed.all_reduce does not free the input tensor until
             # the synchronization point. This causes the memory usage to grow
@@ -490,6 +508,13 @@ class Worker(LocalOrDistributedWorkerBase):
         return CacheEngine.get_cache_block_size(self.cache_config,
                                                 self.model_config,
                                                 self.parallel_config)
+
+
+    # ----------- KV Transfer Logics ----------------
+    
+
+
+    pass
 
 
 def init_worker_distributed_environment(

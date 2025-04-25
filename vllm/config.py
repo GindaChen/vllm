@@ -1845,6 +1845,14 @@ class SchedulerConfig:
     # target class for the core engine process
     engine_core_cls: Optional[str] = None
 
+    # ---------------- KV Transfer Logics ----------------
+    # The base port number for the KV transfer.
+    # Each worker will use this port number + its rank as its KV transfer port.
+    kv_transfer_role: Optional[str] = None
+    kv_transfer_init_port_base: Optional[int] = None
+
+
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,
