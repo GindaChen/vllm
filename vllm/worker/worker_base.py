@@ -2,6 +2,7 @@
 
 import dataclasses
 import os
+import threading
 import time
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
@@ -28,8 +29,6 @@ from vllm.worker.model_runner_base import (BroadcastableModelInput,
                                            ModelRunnerInputBase)
 
 logger = init_logger(__name__)
-print("\033[92mInside worker_base.py\033[0m")
-logger.debug_learning("Inside worker_base.py")
 
 @warn_for_unimplemented_methods
 class WorkerBase:
@@ -597,40 +596,6 @@ class WorkerWrapperBase:
             # To make vLLM config available during worker initialization
             self.worker = worker_class(**kwargs)
             assert self.worker is not None
-
-
-        # Setup the KV trasnfer configuration
-        logger.debug_learning(f"Initializing KV transfer configuration...?")
-        scheduler_config = self.vllm_config.scheduler_config
-        logger.debug_learning(f"Scheduler config: {scheduler_config.kv_transfer_role = }")
-        if scheduler_config.kv_transfer_role is not None:
-            self.kv_transfer_role = scheduler_config.kv_transfer_role
-            self.kv_transfer_init_port = scheduler_config.kv_transfer_init_port_base + self.rpc_rank
-
-            logger.debug_learning(
-                f"Worker {self.rpc_rank} (role = {self.kv_transfer_role}) with KV transfer init port {self.kv_transfer_init_port}"
-            )
-
-            # Now spin up a zmq server to listen for kv transfer requests
-            self.kv_transfer_server = zmq.Context().socket(zmq.REP)
-            self.kv_transfer_server.bind(f"tcp://*:{self.kv_transfer_init_port}")
-
-            # Start the server in a separate thread
-            import threading
-            self.kv_transfer_server_thread = threading.Thread(
-                target=self.kv_transfer_server_thread_loop
-            )
-            self.kv_transfer_server_thread.start()
-            logger.debug_learning(f"Worker {self.rpc_rank} started kv transfer server on port {self.kv_transfer_init_port}")
-
-    def kv_transfer_server_thread_loop(self):
-        while True:
-            # Wait for a request from the client
-            message = self.kv_transfer_server.recv()
-            logger.debug_learning(f"Worker {self.rpc_rank} received message: {message}")
-
-            # Send a response back to the client
-            self.kv_transfer_server.send(f"OK from worker {self.rpc_rank} at port {self.kv_transfer_init_port}".encode())
 
     def initialize_from_config(self, kv_cache_configs: List[Any]) -> None:
         kv_cache_config = kv_cache_configs[self.rpc_rank]
