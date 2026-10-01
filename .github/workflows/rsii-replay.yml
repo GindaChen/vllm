@@ -24,6 +24,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /pyproject.toml
+            /vllm/**/__init__.py
             /vllm/model_executor/model_loader/weight_cache/daemon.py
       - uses: astral-sh/setup-uv@v6
         with:
