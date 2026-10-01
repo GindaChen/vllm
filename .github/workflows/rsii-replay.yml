@@ -1,0 +1,33 @@
+name: RSII replay checks
+
+on:
+  pull_request:
+    paths:
+      - vllm/model_executor/model_loader/weight_cache/**
+      - .github/workflows/rsii-replay.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsii-replay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.repository == 'GindaChen/vllm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /pyproject.toml
+            /vllm/model_executor/model_loader/weight_cache/daemon.py
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv tool run --from ruff==0.15.6 ruff check vllm/model_executor/model_loader/weight_cache/daemon.py
+      - run: uv tool run --from ruff==0.15.6 ruff format --check vllm/model_executor/model_loader/weight_cache/daemon.py
