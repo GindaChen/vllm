@@ -81,6 +81,7 @@ from vllm.platforms import current_platform
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.utils.network_utils import get_distributed_init_method, get_open_port
 from vllm.utils.torch_utils import set_default_torch_dtype
+from vllm.v1.worker.workspace import init_workspace_manager
 
 logger = init_logger("vllm.model_executor.model_loader.weight_cache.daemon")
 
@@ -181,6 +182,10 @@ class WeightCacheDaemon:
     def load_model(self) -> None:
         tp_size = self.cache_config.tp_size
         torch.accelerator.set_device_index(self.local_rank)
+        # Attention backends may request scratch space during construction.
+        init_workspace_manager(
+            torch.device(current_platform.device_type, self.local_rank)
+        )
         init_distributed_environment(
             world_size=tp_size,
             rank=self.tp_rank,
