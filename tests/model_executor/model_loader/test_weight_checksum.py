@@ -32,8 +32,13 @@ class _Model(nn.Module):
         self.register_buffer("k_scale", torch.tensor(2.0))
 
 
-def test_digests_cover_every_parameter():
-    assert set(compute_tensor_digests(_Model())) == {
+@pytest.mark.parametrize("hash_workers", [0, 1, 2, 4])
+def test_digests_cover_every_parameter(hash_workers):
+    model = _Model()
+    digests = compute_tensor_digests(model, hash_workers=hash_workers)
+    assert digests == compute_tensor_digests(model)
+    assert list(digests) == list(compute_tensor_digests(model))
+    assert set(digests) == {
         "linear.weight",
         "linear.bias",
         "strided",
@@ -50,7 +55,8 @@ def test_zero_weights_changes_every_parameter_and_no_buffer():
     assert model.k_scale.item() == 2.0
 
 
-def test_shared_weight_partitions_are_hashed_and_reset(monkeypatch):
+@pytest.mark.parametrize("hash_workers", [0, 2])
+def test_shared_weight_partitions_are_hashed_and_reset(monkeypatch, hash_workers):
     monkeypatch.setattr(parameter, "get_tensor_model_parallel_rank", lambda: 0)
     monkeypatch.setattr(parameter, "get_tensor_model_parallel_world_size", lambda: 1)
     model = nn.Module()
@@ -58,24 +64,36 @@ def test_shared_weight_partitions_are_hashed_and_reset(monkeypatch):
     model.transform.add_partition(0, object(), 2, 2)
     model.transform.partitions[0].data.fill_(3.0)
 
-    before = compute_tensor_digests(model)
+    before = compute_tensor_digests(model, hash_workers=hash_workers)
+    assert before == compute_tensor_digests(model)
     zero_weights(model)
     assert set(before) == {"transform.0"}
-    assert compute_tensor_digests(model) != before
+    assert compute_tensor_digests(model, hash_workers=hash_workers) != before
 
 
-def test_tensor_subclass_inner_tensors_are_hashed_and_reset():
+@pytest.mark.parametrize("hash_workers", [0, 2])
+def test_tensor_subclass_inner_tensors_are_hashed_and_reset(hash_workers):
     model = nn.Module()
     model.weight = nn.Parameter(
         TwoTensor(torch.ones(2, 2), torch.full((2, 2), 2.0)), requires_grad=False
     )
 
-    before = compute_tensor_digests(model)
+    before = compute_tensor_digests(model, hash_workers=hash_workers)
+    assert before == compute_tensor_digests(model)
     zero_weights(model)
     assert set(before) == {"weight.a", "weight.b"}
     assert all(
-        before[name] != digest for name, digest in compute_tensor_digests(model).items()
+        before[name] != digest
+        for name, digest in compute_tensor_digests(
+            model, hash_workers=hash_workers
+        ).items()
     )
+
+
+@pytest.mark.parametrize("hash_workers", [-1, 5, True, 1.5])
+def test_invalid_hash_worker_count_is_rejected(hash_workers):
+    with pytest.raises(ValueError, match="hash_workers"):
+        compute_tensor_digests(_Model(), hash_workers=hash_workers)
 
 
 def test_dense_dp_replicas_get_distinct_key_prefixes(monkeypatch):

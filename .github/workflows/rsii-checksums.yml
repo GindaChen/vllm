@@ -1,0 +1,40 @@
+name: RSII checksum source checks
+
+on:
+  pull_request:
+    paths:
+      - vllm/model_executor/model_loader/weight_checksum.py
+      - vllm/v1/worker/gpu_worker.py
+      - tests/model_executor/model_loader/test_weight_checksum.py
+      - .github/workflows/rsii-checksums.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsii-checksums-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.repository == 'GindaChen/vllm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /pyproject.toml
+            /vllm/**/__init__.py
+            /vllm/model_executor/model_loader/weight_checksum.py
+            /vllm/v1/worker/gpu_worker.py
+            /tests/model_executor/model_loader/test_weight_checksum.py
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - name: Check changed engine source
+        run: |
+          uv tool run --from ruff==0.15.6 ruff check vllm/model_executor/model_loader/weight_checksum.py vllm/v1/worker/gpu_worker.py tests/model_executor/model_loader/test_weight_checksum.py
+          uv tool run --from ruff==0.15.6 ruff format --check vllm/model_executor/model_loader/weight_checksum.py vllm/v1/worker/gpu_worker.py tests/model_executor/model_loader/test_weight_checksum.py

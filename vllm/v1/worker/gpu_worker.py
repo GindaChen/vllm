@@ -354,9 +354,11 @@ class Worker(WorkerBase):
         tp = get_tp_group().rank_in_group
         return f"dp{dp}:pp{pp}:pcp{pcp}:tp{tp}:"
 
-    def compute_weight_checksums(self) -> dict[str, str]:
+    def compute_weight_checksums(self, hash_workers: int = 0) -> dict[str, str]:
         prefix = self._weight_checksum_prefix()
-        digests = compute_tensor_digests(self.model_runner.get_model())
+        digests = compute_tensor_digests(
+            self.model_runner.get_model(), hash_workers=hash_workers
+        )
         return {prefix + name: digest for name, digest in digests.items()}
 
     def reset_weights(self) -> None:
