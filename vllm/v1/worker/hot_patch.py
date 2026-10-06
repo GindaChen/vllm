@@ -129,6 +129,11 @@ SHARE_KERNEL_CACHE = True
 # Serializing the AOT artifact after a hot-patch recompile only helps a later
 # restart with exactly this revision; skip it by default.
 SAVE_AOT_AFTER_PATCH = False
+# vLLM dedupes piecewise graphs in memory by their AOTAutograd cache key,
+# which covers the graph, its inputs and the compiler config. One pool for
+# the process lets a recompile after a patch reuse every unchanged graph.
+SHARE_COMPILED_ARTIFACTS = True
+_ARTIFACTS: dict[str, Any] = {}
 _KERNEL_CACHE_ENV = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
 # The stock compile's kernel cache directories, captured at the first patch.
 _KERNEL_CACHE: dict[str, str] = {}
@@ -159,6 +164,11 @@ def shared_kernel_cache() -> dict[str, str]:
     if SHARE_KERNEL_CACHE and revision_factor():
         return dict(_KERNEL_CACHE)
     return {}
+
+
+def compiled_artifact_pool() -> dict[str, Any]:
+    """The compiled-graph dedupe table a new vLLM compiler should use."""
+    return _ARTIFACTS if SHARE_COMPILED_ARTIFACTS else {}
 
 
 def skip_aot_save() -> bool:
@@ -479,6 +489,7 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
 
     cache_keys = ("fxgraph_cache_hit", "fxgraph_cache_miss", "fxgraph_cache_bypass")
     before = {k: counters["inductor"][k] for k in cache_keys}
+    artifacts_before = len(_ARTIFACTS)
     times = _CompileTimes()
     vllm_logger = logging.getLogger("vllm")
     vllm_logger.addHandler(times)
@@ -506,6 +517,8 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
         "warmup_capture_seconds": done - compiled,
         "kernel_cache": "shared" if shared_kernel_cache() else "per revision",
         **{k: counters["inductor"][k] - before[k] for k in cache_keys},
+        "compiled_artifacts_new": len(_ARTIFACTS) - artifacts_before,
+        "compiled_artifacts_shared": SHARE_COMPILED_ARTIFACTS,
         "aot_saved": SAVE_AOT_AFTER_PATCH,
     }
 

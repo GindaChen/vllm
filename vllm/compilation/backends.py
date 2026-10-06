@@ -141,7 +141,11 @@ class CompilerManager:
         self.is_cache_updated = False
         self.compilation_config = compilation_config
         self.compiler = make_compiler(compilation_config)
-        self.loaded_artifacts: dict[str, Any] = {}
+        # Keyed by AOTAutograd cache key (graph, inputs, config). Shared
+        # across backends while hot patching, so unchanged graphs are reused.
+        from vllm.v1.worker.hot_patch import compiled_artifact_pool
+
+        self.loaded_artifacts: dict[str, Any] = compiled_artifact_pool()
         self.prefix: str = ""
 
     def _log_prefix(self) -> str:
