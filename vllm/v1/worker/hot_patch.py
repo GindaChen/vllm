@@ -64,6 +64,20 @@ class ChangedFunction:
     new_code: CodeType
 
 
+@dataclass(frozen=True)
+class KernelEdit:
+    """A changed Triton kernel, left for a kernel handler to install."""
+
+    module: str
+    qualname: str
+    # The outermost live object (JITFunction, Autotuner, Heuristics).
+    live: Any
+    # The new definition, from its first decorator line to its end.
+    new_source: str
+    module_source: str
+    filename: str
+
+
 @dataclass
 class CodePatch:
     """What ``reload_sources`` changed."""
@@ -75,6 +89,16 @@ class CodePatch:
     owners: set[type] = field(default_factory=set)
     # Live module instances of those classes, by FQN.
     modules: list[tuple[str, nn.Module]] = field(default_factory=list)
+    # Triton kernels, installed by KERNEL_HANDLERS, and their reports.
+    kernels: list[KernelEdit] = field(default_factory=list)
+    kernel_reports: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def needs_graph_policy(self) -> bool:
+        """Python bodies changed, or a kernel handler asked for it."""
+        return bool(self.changed) or any(
+            report.get("needs_recapture") for report in self.kernel_reports
+        )
 
 
 # Module name -> (source text, filename) currently installed. Initialized
@@ -88,6 +112,13 @@ _WATCHED: dict[CodeType, str] = {}
 _TRACED: set[str] = set()
 
 GRAPH_POLICIES: dict[str, Callable[[Any, CodePatch], dict[str, Any]]] = {}
+
+# Handlers for edited Triton kernels: handler(worker, kernels) -> report.
+# `worker` is None before the engine exists (a fresh engine with the edit).
+# A handler installs the kernels in place (and may swap them into captured
+# graphs) or raises UnsupportedEdit; nothing is installed then. A report with
+# "needs_recapture": True makes hot_patch run the graph policy afterwards.
+KERNEL_HANDLERS: list[Callable[[Any, list[KernelEdit]], dict[str, Any]]] = []
 
 # Inductor's FX-graph cache and Triton's kernel cache are keyed by graph and
 # kernel content, so a revision can safely reuse the stock compile's
@@ -254,18 +285,34 @@ def _unwrap(value: Any, qualname: str, filename: str) -> FunctionType:
     raise UnsupportedEdit(f"{qualname}: no live function found")
 
 
-def _live_function(
-    module: ModuleType, qualname: str, filename: str
-) -> tuple[FunctionType, type | None]:
+def _live_value(module: ModuleType, qualname: str) -> tuple[Any, type | None]:
     owner: Any = module
     *path, name = qualname.split(".")
     for part in path:
         owner = owner.__dict__[part]
-    value = owner.__dict__[name]
-    return _unwrap(value, qualname, filename), owner if path else None
+    return owner.__dict__[name], owner if path else None
 
 
-def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
+def _is_kernel(value: Any) -> bool:
+    try:
+        from triton.runtime.jit import KernelInterface
+    except ImportError:
+        return False
+    return isinstance(value, KernelInterface)
+
+
+def _definition_source(source: str, qualname: str) -> str:
+    """The text of `qualname`'s definition, decorators included."""
+    node = dict(_statements(ast.parse(source)))[qualname]
+    assert isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    first = min([d.lineno for d in node.decorator_list] + [node.lineno])
+    lines = source.splitlines(keepends=True)
+    return "".join(lines[first - 1 : node.end_lineno])
+
+
+def reload_sources(
+    sources: dict[str, tuple[str, str]], worker: Any = None
+) -> CodePatch:
     """Install new function bodies from `sources` into live modules.
 
     Args:
@@ -273,8 +320,13 @@ def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
             names the new code objects (tracebacks, compile cache hashes);
             pass a real file holding exactly that text.
 
+        worker: The live worker, or None before the engine starts. Passed
+            to kernel handlers.
+
     Returns:
-        The changed functions. Unchanged functions keep their code.
+        The changed functions. Unchanged functions keep their code. Edited
+        Triton kernels are handed to KERNEL_HANDLERS before any function
+        body is installed.
 
     Raises:
         UnsupportedEdit: The edit changes more than function bodies. Nothing
@@ -284,6 +336,7 @@ def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
     if not _KERNEL_CACHE and all(k in os.environ for k in _KERNEL_CACHE_ENV):
         _KERNEL_CACHE.update({k: os.environ[k] for k in _KERNEL_CACHE_ENV})
     plans = []
+    kernels: list[KernelEdit] = []
     for name, (source, filename) in sources.items():
         module = sys.modules[name]
         if name not in _INSTALLED:
@@ -295,7 +348,20 @@ def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
         compiled = compile(source, filename, "exec", dont_inherit=True)
         changes = []
         for qualname in _diff(name, old_source, source):
-            function, owner = _live_function(module, qualname, old_filename)
+            value, owner = _live_value(module, qualname)
+            if _is_kernel(value):
+                kernels.append(
+                    KernelEdit(
+                        name,
+                        qualname,
+                        value,
+                        _definition_source(source, qualname),
+                        source,
+                        filename,
+                    )
+                )
+                continue
+            function = _unwrap(value, qualname, old_filename)
             new = _new_code(compiled, qualname)
             if new.co_freevars != function.__code__.co_freevars:
                 raise UnsupportedEdit(
@@ -305,7 +371,15 @@ def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
             changes.append((qualname, function, owner, new))
         plans.append((name, source, filename, changes))
 
-    patch = CodePatch(sources={}, changed=[])
+    patch = CodePatch(sources={}, changed=[], kernels=kernels)
+    if kernels:
+        if not KERNEL_HANDLERS:
+            names = [f"{k.module}:{k.qualname}" for k in kernels]
+            raise UnsupportedEdit(f"No kernel handler for Triton edits {names}")
+        # Kernels first: a refusal leaves everything uninstalled, and a
+        # following recompile sees the new kernels.
+        for handler in KERNEL_HANDLERS:
+            patch.kernel_reports.append(handler(worker, kernels))
     _WATCHED.clear()
     _TRACED.clear()
     for name, source, filename, changes in plans:
@@ -461,16 +535,21 @@ def hot_patch(
     if graph_policy not in GRAPH_POLICIES:
         raise ValueError(f"Unknown graph policy {graph_policy!r}")
     started = time.perf_counter()
-    patch = reload_sources(sources)
+    patch = reload_sources(sources, worker)
     _find_instances(runner.get_model(), patch)
     patched = time.perf_counter()
-    timings = GRAPH_POLICIES[graph_policy](worker, patch)
+    timings: dict[str, Any] = {}
+    if patch.needs_graph_policy:
+        timings = GRAPH_POLICIES[graph_policy](worker, patch)
     torch.accelerator.synchronize()
     done = time.perf_counter()
     return {
         "graph_policy": graph_policy,
         "sources": patch.sources,
         "changed": [f"{c.module}:{c.qualname}" for c in patch.changed],
+        "kernels": [f"{k.module}:{k.qualname}" for k in patch.kernels],
+        "kernel_reports": patch.kernel_reports,
+        "graph_policy_ran": patch.needs_graph_policy,
         "modules": len(patch.modules),
         "traced": sorted(traced_functions()),
         "revision_factor": revision_factor(),

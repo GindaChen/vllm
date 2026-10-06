@@ -126,3 +126,73 @@ def test_closure_change_refused(tmp_path, module):
     source = STOCK.replace(old, old.replace("return x", "return super() and x"))
     with pytest.raises(hot_patch.UnsupportedEdit, match="closure"):
         install(tmp_path, module, source, "e")
+
+
+KERNELS = """
+import triton
+
+
+@triton.jit
+def kernel(x_ptr):
+    pass
+
+
+def host(x):
+    return x + 1
+"""
+
+
+@pytest.fixture
+def kernels(tmp_path, monkeypatch):
+    pytest.importorskip("triton")
+    name = "rsii_hot_patch_kernels"
+    (tmp_path / f"{name}.py").write_text(KERNELS)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for table in (sys.modules, hot_patch._INSTALLED, hot_patch._STOCK):
+        table.pop(name, None)
+    monkeypatch.setattr(hot_patch, "KERNEL_HANDLERS", [])
+    yield importlib.import_module(name)
+    for table in (sys.modules, hot_patch._INSTALLED, hot_patch._STOCK):
+        table.pop(name, None)
+
+
+def test_kernel_edit_needs_a_handler(tmp_path, kernels):
+    source = KERNELS.replace("    pass", "    x = 1").replace("x + 1", "x + 2")
+    with pytest.raises(hot_patch.UnsupportedEdit, match="kernel handler"):
+        install(tmp_path, kernels, source, "k0")
+    assert kernels.host(1) == 2
+
+
+def test_kernel_handler_runs_before_bodies(tmp_path, kernels):
+    seen = []
+
+    def handler(worker, edits):
+        seen.extend(edits)
+        assert kernels.host(1) == 2  # bodies not installed yet
+        return {"swapped": len(edits)}
+
+    hot_patch.KERNEL_HANDLERS.append(handler)
+    source = KERNELS.replace("    pass", "    x = 1").replace("x + 1", "x + 2")
+    patch = install(tmp_path, kernels, source, "k1")
+    (edit,) = seen
+    assert edit.live is kernels.kernel and edit.qualname == "kernel"
+    assert edit.new_source.startswith("@triton.jit\ndef kernel")
+    assert edit.new_source.endswith("    x = 1\n")
+    assert [c.qualname for c in patch.changed] == ["host"]
+    assert patch.kernel_reports == [{"swapped": 1}]
+    assert kernels.host(1) == 3 and patch.needs_graph_policy
+
+
+def test_kernel_refusal_installs_nothing(tmp_path, kernels):
+    def handler(worker, edits):
+        raise hot_patch.UnsupportedEdit("launch config")
+
+    hot_patch.KERNEL_HANDLERS.append(handler)
+    source = KERNELS.replace("    pass", "    x = 1").replace("x + 1", "x + 2")
+    with pytest.raises(hot_patch.UnsupportedEdit, match="launch config"):
+        install(tmp_path, kernels, source, "k2")
+    assert kernels.host(1) == 2
+    # A kernel-only edit runs no graph policy unless asked.
+    hot_patch.KERNEL_HANDLERS[:] = [lambda worker, edits: {}]
+    patch = install(tmp_path, kernels, KERNELS.replace("    pass", "    y = 1"), "k3")
+    assert not patch.changed and not patch.needs_graph_policy
