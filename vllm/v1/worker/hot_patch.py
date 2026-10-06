@@ -332,8 +332,17 @@ def _find_instances(model: nn.Module, patch: CodePatch) -> None:
     ]
 
 
-def _release_compiled_state(worker: Any) -> None:
-    from vllm.compilation.wrapper import reset_compile_wrapper
+def _release_compiled_state(worker: Any) -> int:
+    """Drop CUDA graphs and every compiled submodule; return how many.
+
+    The compiled module is not always the model or ``model.model``: a
+    multimodal wrapper holds it deeper (``language_model.model``), so every
+    ``support_torch_compile`` instance is reset.
+    """
+    from vllm.compilation.wrapper import (
+        TorchCompileWithNoGuardsWrapper,
+        reset_compile_wrapper,
+    )
     from vllm.config import set_current_vllm_config
 
     runner = worker.model_runner
@@ -341,11 +350,19 @@ def _release_compiled_state(worker: Any) -> None:
     if manager is not None:
         manager.release_graphs()
     torch.compiler.reset()
+    compiled = [
+        module
+        for module in runner.get_model().modules()
+        if isinstance(module, TorchCompileWithNoGuardsWrapper)
+        and not getattr(module, "do_not_compile", True)
+    ]
     with set_current_vllm_config(worker.vllm_config):
-        reset_compile_wrapper(runner.get_model())
+        for module in compiled:
+            reset_compile_wrapper(module)
     gc.collect()
     torch.accelerator.synchronize()
     torch.accelerator.empty_cache()
+    return len(compiled)
 
 
 class _CompileTimes(logging.Handler):
@@ -376,7 +393,13 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
 
     runner = worker.model_runner
     started = time.perf_counter()
-    _release_compiled_state(worker)
+    num_compiled = _release_compiled_state(worker)
+    from vllm.config import CompilationMode
+
+    # Recapturing graphs around a stale compiled model would run old code.
+    mode = worker.vllm_config.compilation_config.mode
+    if mode == CompilationMode.VLLM_COMPILE and num_compiled == 0:
+        raise RuntimeError("hot_patch found no compiled submodule to reset")
     released = time.perf_counter()
     times = _CompileTimes()
     vllm_logger = logging.getLogger("vllm")
@@ -397,6 +420,7 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
     done = time.perf_counter()
     compile_seconds = compiled - released
     return {
+        "compiled_modules_reset": num_compiled,
         "release_seconds": released - started,
         "compile_seconds": compile_seconds,
         **times.seconds,
