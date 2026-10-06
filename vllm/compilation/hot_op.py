@@ -285,3 +285,58 @@ def reset_calls() -> None:
 def breaks_full_graphs() -> bool:
     """Whether FULL graphs must be captured with eager breaks."""
     return bool(_FUNCTIONS)
+
+
+# ---------------------------------------------------------------------------
+# Graph policy for vllm.v1.worker.hot_patch
+# ---------------------------------------------------------------------------
+
+
+def break_policy(worker: Any, patch: Any) -> dict[str, Any]:
+    """``graph_policy="break"``: rebuild nothing for hot functions.
+
+    A changed function that is already the implementation of a hot function
+    runs eagerly from the registry, so nothing compiled or captured is stale.
+    A changed method that is not hot yet was inlined into compiled code: it
+    is made hot, and the model is recompiled and recaptured once (the
+    ``recapture`` policy) with the opaque op in its place. Later edits of it
+    then rebuild nothing. Any other changed function falls back to a plain
+    recompile and recapture.
+    """
+    import time
+
+    from vllm.v1.worker.hot_patch import recapture
+
+    started = time.perf_counter()
+    hot, cold = [], []
+    for change in patch.changed:
+        key = find_hot(change.function)
+        if key is not None:
+            hot.append(key)
+        else:
+            cold.append(f"{change.module}:{change.qualname}")
+    report: dict[str, Any] = {"hot_unchanged_graphs": hot, "promoted": []}
+    if not cold:
+        report["rebuilt"] = "nothing"
+        report["break_seconds"] = time.perf_counter() - started
+        return report
+    model = worker.model_runner.get_model()
+    promotable = []
+    for key in cold:
+        try:
+            cls, _ = resolve(key)
+        except (ValueError, AttributeError, ImportError):
+            continue
+        if any(isinstance(m, cls) for m in model.modules()):
+            promotable.append(key)
+    if promotable:
+        ensure_splitting_op(worker.vllm_config.compilation_config)
+        install(model, promotable)
+        keys = parse_keys(os.environ.get(ENV_NAME)) + promotable
+        # The hot set is a compile factor; keep the env in sync.
+        os.environ[ENV_NAME] = ",".join(dict.fromkeys(keys))
+    report["promoted"] = promotable
+    report["rebuilt"] = "recompile+recapture"
+    report.update(recapture(worker, patch))
+    report["break_seconds"] = time.perf_counter() - started
+    return report

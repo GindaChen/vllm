@@ -410,6 +410,16 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
 GRAPH_POLICIES["recapture"] = recapture
 
 
+def _break(worker: Any, patch: CodePatch) -> dict[str, Any]:
+    from vllm.compilation.hot_op import break_policy
+
+    return break_policy(worker, patch)
+
+
+# Hot functions (vllm/compilation/hot_op.py): edits rebuild nothing.
+GRAPH_POLICIES["break"] = _break
+
+
 def hot_patch(
     worker: Any,
     sources: dict[str, tuple[str, str]],
