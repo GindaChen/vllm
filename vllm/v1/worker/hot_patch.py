@@ -385,8 +385,9 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
     _IN_RECAPTURE = True
     try:
         with preserve_serving_state(runner):
-            # The first call compiles, as profile_run does at startup.
-            runner._dummy_run(runner.max_num_tokens, is_profile=True, skip_eplb=True)
+            # The first call compiles. Not a profile run: KV memory exists
+            # now, and hybrid models must address real state slots.
+            runner._dummy_run(runner.max_num_tokens, skip_eplb=True)
             compiled = time.perf_counter()
             worker.compile_or_warm_up_model()
     finally:
