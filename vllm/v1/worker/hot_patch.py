@@ -30,6 +30,9 @@ would silently reload the stock AOT artifact.
 import ast
 import gc
 import hashlib
+import logging
+import os
+import re
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -86,6 +89,20 @@ _TRACED: set[str] = set()
 
 GRAPH_POLICIES: dict[str, Callable[[Any, CodePatch], dict[str, Any]]] = {}
 
+# Inductor's FX-graph cache and Triton's kernel cache are keyed by graph and
+# kernel content, so a revision can safely reuse the stock compile's
+# directories: unchanged subgraphs hit, changed ones miss. vLLM's own
+# compiled-graph and AOT caches are not content-addressed and stay per
+# revision (revision_factor).
+SHARE_KERNEL_CACHE = True
+# Serializing the AOT artifact after a hot-patch recompile only helps a later
+# restart with exactly this revision; skip it by default.
+SAVE_AOT_AFTER_PATCH = False
+_KERNEL_CACHE_ENV = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
+# The stock compile's kernel cache directories, captured at the first patch.
+_KERNEL_CACHE: dict[str, str] = {}
+_IN_RECAPTURE = False
+
 
 def revision_factor() -> str:
     """Hash of every installed revision, for compile cache keys.
@@ -100,6 +117,22 @@ def revision_factor() -> str:
     if not revised:
         return ""
     return hashlib.sha256(repr(revised).encode()).hexdigest()
+
+
+def shared_kernel_cache() -> dict[str, str]:
+    """Kernel cache directories a patched model should compile into.
+
+    Empty unless a revision is installed into an engine that had compiled
+    the stock model (fresh engines keep vLLM's per-source directories).
+    """
+    if SHARE_KERNEL_CACHE and revision_factor():
+        return dict(_KERNEL_CACHE)
+    return {}
+
+
+def skip_aot_save() -> bool:
+    """Whether to skip saving the AOT artifact of a hot-patch recompile."""
+    return _IN_RECAPTURE and not SAVE_AOT_AFTER_PATCH
 
 
 def note_traced(code: CodeType) -> None:
@@ -248,6 +281,8 @@ def reload_sources(sources: dict[str, tuple[str, str]]) -> CodePatch:
             is installed in that case.
 
     """
+    if not _KERNEL_CACHE and all(k in os.environ for k in _KERNEL_CACHE_ENV):
+        _KERNEL_CACHE.update({k: os.environ[k] for k in _KERNEL_CACHE_ENV})
     plans = []
     for name, (source, filename) in sources.items():
         module = sys.modules[name]
@@ -313,8 +348,29 @@ def _release_compiled_state(worker: Any) -> None:
     torch.accelerator.empty_cache()
 
 
+class _CompileTimes(logging.Handler):
+    """Collect vLLM's Dynamo and Inductor compile times from its log."""
+
+    PATTERNS = {
+        "dynamo_seconds": re.compile(r"Dynamo bytecode transform time: ([\d.]+) s"),
+        "inductor_seconds": re.compile(r"Compiling a graph for .* takes ([\d.]+) s"),
+    }
+
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self.seconds = dict.fromkeys(self.PATTERNS, 0.0)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        for key, pattern in self.PATTERNS.items():
+            match = pattern.search(message)
+            if match:
+                self.seconds[key] += float(match.group(1))
+
+
 def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
     """Baseline policy: recompile and recapture everything in-process."""
+    global _IN_RECAPTURE
     from vllm.v1.worker.gpu.eplb_utils import preserve_serving_state
     from vllm.v1.worker.workspace import lock_workspace, unlock_workspace
 
@@ -322,7 +378,11 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
     started = time.perf_counter()
     _release_compiled_state(worker)
     released = time.perf_counter()
+    times = _CompileTimes()
+    vllm_logger = logging.getLogger("vllm")
+    vllm_logger.addHandler(times)
     unlock_workspace()
+    _IN_RECAPTURE = True
     try:
         with preserve_serving_state(runner):
             # The first call compiles, as profile_run does at startup.
@@ -330,12 +390,19 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
             compiled = time.perf_counter()
             worker.compile_or_warm_up_model()
     finally:
+        _IN_RECAPTURE = False
+        vllm_logger.removeHandler(times)
         lock_workspace()
     done = time.perf_counter()
+    compile_seconds = compiled - released
     return {
         "release_seconds": released - started,
-        "compile_seconds": compiled - released,
+        "compile_seconds": compile_seconds,
+        **times.seconds,
+        "compile_other_seconds": compile_seconds - sum(times.seconds.values()),
         "warmup_capture_seconds": done - compiled,
+        "kernel_cache": "shared" if shared_kernel_cache() else "per revision",
+        "aot_saved": SAVE_AOT_AFTER_PATCH,
     }
 
 

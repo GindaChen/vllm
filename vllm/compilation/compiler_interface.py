@@ -473,6 +473,10 @@ class InductorAdaptor(CompilerInterface):
             _last_inductor_triton_cache_dir = triton_cache
         os.makedirs(triton_cache, exist_ok=True)
         os.environ["TRITON_CACHE_DIR"] = triton_cache
+        # A hot-patched model reuses the stock content-addressed kernel caches.
+        from vllm.v1.worker.hot_patch import shared_kernel_cache
+
+        os.environ.update(shared_kernel_cache())
 
     def compile(
         self,

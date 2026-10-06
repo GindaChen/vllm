@@ -731,6 +731,12 @@ def _support_torch_compile(
             logger.debug("AOT compiled function was loaded from cache, skipping save")
             return
 
+        from vllm.v1.worker.hot_patch import skip_aot_save
+
+        if skip_aot_save():
+            logger.debug("Hot-patch recompile, skipping AOT save")
+            return
+
         assert (
             self.aot_compiled_fn and self._aot_compilation_path and self._aot_cache_dir
         )
