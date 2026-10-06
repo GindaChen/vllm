@@ -620,6 +620,8 @@ def _support_torch_compile(
             if is_padding is not None:
                 torch._dynamo.mark_dynamic(is_padding, 0)
 
+        from vllm.v1.worker.hot_patch import note_traced
+
         original_code_object = self.original_code_object()
         logger.debug("Start compiling function %s", original_code_object)
 
@@ -633,6 +635,7 @@ def _support_torch_compile(
 
         # 1. the file containing the top-level forward function
         self.compilation_config.traced_files.add(original_code_object.co_filename)
+        note_traced(original_code_object)
 
         # 2. every time Dynamo sees a function call, it will inline
         # the function by calling InliningInstructionTranslator.inline_call_
@@ -643,6 +646,7 @@ def _support_torch_compile(
         def patched_inline_call(self_: Any) -> Any:
             code = self_.f_code
             self.compilation_config.traced_files.add(code.co_filename)
+            note_traced(code)
             return inline_call(self_)
 
         # Disable the C++ compilation of symbolic shape guards. C++-fication

@@ -1068,6 +1068,10 @@ class VllmBackend:
             # the cache dir will be the same so that we can reuse the compiled
             # graph.
             factors = [env_hash, config_hash, code_hash, compiler_hash]
+            from vllm.v1.worker.hot_patch import revision_factor
+
+            if revision := revision_factor():
+                factors.append(revision)
             # Use SHA-256 for cache key hashing to be consistent across
             # compute_hash functions. Truncate for a short cache dir name.
             hash_key = hashlib.sha256(str(factors).encode()).hexdigest()[:10]

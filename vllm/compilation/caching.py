@@ -585,6 +585,14 @@ def aot_compile_hash_factors(vllm_config: VllmConfig) -> list[str]:
     if envs.VLLM_USE_MEGA_AOT_ARTIFACT:
         factors.extend(get_inductor_factors())
 
+    # 3. hot-patched model source: the AOT key does not hash traced files,
+    #    so an in-process code revision must be part of it.
+    from vllm.v1.worker.hot_patch import revision_factor
+
+    revision = revision_factor()
+    if revision:
+        factors.append(revision)
+
     return factors
 
 
