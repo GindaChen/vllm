@@ -385,7 +385,7 @@ def splice_promote(worker: Any, traced_codes: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
     runner = worker.model_runner
     edited = []
-    for fn in splice.serializable_functions():
+    for fn in splice.serializable_functions(runner.get_model()):
         gm = fn.graph_module
         if any(n.op == "call_module" for n in gm.graph.nodes):
             gm = splice.flatten(gm)

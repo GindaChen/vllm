@@ -35,13 +35,28 @@ logger = init_logger(__name__)
 _FRAME = re.compile(r'File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<name>\S+)')
 
 
-def serializable_functions() -> list[Any]:
-    """Live compiled-model callables (one per compiled top module)."""
-    import gc
+def serializable_functions(model: torch.nn.Module) -> list[Any]:
+    """The compiled callables of every compiled module inside ``model``.
 
-    from vllm.compilation.caching import VllmSerializableFunction
+    Covers each ``@support_torch_compile`` instance, nested ones included,
+    whose compiled function is held by its AOT-compiled wrapper (the default
+    with torch >= 2.10).
+    """
+    from vllm.compilation.wrapper import TorchCompileWithNoGuardsWrapper
 
-    return [o for o in gc.get_objects() if isinstance(o, VllmSerializableFunction)]
+    found = []
+    for module in model.modules():
+        if not isinstance(module, TorchCompileWithNoGuardsWrapper):
+            continue
+        aot = getattr(module, "aot_compiled_fn", None)
+        artifacts = getattr(aot, "_artifacts", None)
+        fn = getattr(artifacts, "compiled_fn", None)
+        if fn is None:
+            raise ValueError(
+                f"{type(module).__name__} has no AOT-compiled function to edit"
+            )
+        found.append(fn)
+    return found
 
 
 # ---------------------------------------------------------------------------
