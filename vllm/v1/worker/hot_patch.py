@@ -401,6 +401,10 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
     if mode == CompilationMode.VLLM_COMPILE and num_compiled == 0:
         raise RuntimeError("hot_patch found no compiled submodule to reset")
     released = time.perf_counter()
+    from torch._dynamo.utils import counters
+
+    cache_keys = ("fxgraph_cache_hit", "fxgraph_cache_miss", "fxgraph_cache_bypass")
+    before = {k: counters["inductor"][k] for k in cache_keys}
     times = _CompileTimes()
     vllm_logger = logging.getLogger("vllm")
     vllm_logger.addHandler(times)
@@ -427,6 +431,7 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
         "compile_other_seconds": compile_seconds - sum(times.seconds.values()),
         "warmup_capture_seconds": done - compiled,
         "kernel_cache": "shared" if shared_kernel_cache() else "per revision",
+        **{k: counters["inductor"][k] - before[k] for k in cache_keys},
         "aot_saved": SAVE_AOT_AFTER_PATCH,
     }
 
