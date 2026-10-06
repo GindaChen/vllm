@@ -113,8 +113,23 @@ def rsii_hot_call(out: torch.Tensor, hot_id: int, args: list[torch.Tensor]) -> N
 
     capture = BreakableCUDAGraphCapture.current()
     if capture is None or not capture._capturing:
+        if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+            # Called from inside another opaque op (Dynamo never saw the
+            # stub, so it is no splitting op) during a graph capture: the
+            # body would be frozen into the graph and later swaps ignored.
+            raise RuntimeError(
+                f"Hot function {_SLOTS[hot_id][0].key} runs inside a CUDA "
+                "graph capture that cannot break (called from another "
+                "custom op?); make its caller hot instead"
+            )
         _run_slot(out, hot_id, args)
         return
+    if torch.cuda.current_stream() != getattr(capture, "_stream", None):
+        raise RuntimeError(
+            f"Hot function {_SLOTS[hot_id][0].key} runs on a side stream "
+            "during a breakable capture (called from another custom op?); "
+            "make its caller hot instead"
+        )
     # Inside a breakable capture: end the graph segment, run eagerly, record
     # the eager step for replay and resume capture. Weak references keep the
     # replay closure from pinning graph-pool memory; the graph pool owns it.

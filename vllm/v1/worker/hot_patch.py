@@ -345,8 +345,18 @@ def _release_compiled_state(worker: Any) -> None:
     if manager is not None:
         manager.release_graphs()
     torch.compiler.reset()
+    from vllm.compilation.wrapper import TorchCompileWithNoGuardsWrapper
+
+    model = runner.get_model()
+    # Multimodal wrappers compile a nested module (for example
+    # language_model.model), which reset_compile_wrapper(model) misses; a
+    # missed one would keep running the old compiled code.
+    compiled = [
+        m for m in model.modules() if isinstance(m, TorchCompileWithNoGuardsWrapper)
+    ]
     with set_current_vllm_config(worker.vllm_config):
-        reset_compile_wrapper(runner.get_model())
+        for module in compiled or [model]:
+            reset_compile_wrapper(module)
     gc.collect()
     torch.accelerator.synchronize()
     torch.accelerator.empty_cache()
