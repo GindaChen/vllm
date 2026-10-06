@@ -19,15 +19,19 @@ on every call, so swapping the implementation needs no Dynamo trace, no
 Inductor compile and no graph capture.
 
 Hot functions are selected with ``VLLM_HOT_FUNCTIONS`` (comma-separated
-``module:Class.method``) before the model is compiled, or later in a live
-engine followed by a recompile. The set is part of the compile cache key
-because the env var is a compile factor.
+``module:Class.method`` or ``Class.method``, resolved against the model's
+modules) before the model is compiled, or later in a live engine followed by
+a recompile. The set is part of the compile cache key because the env var is
+a compile factor. :func:`graduate` turns hot functions back into compiled
+code once iteration is done.
 
 Constraints of a hot function (checked at call time):
     * Positional tensor arguments only (besides ``self``).
-    * It returns one tensor with the shape, dtype and device of its first
-      argument; the stub preallocates that output so its address is stable
-      across graph replays.
+    * It returns one tensor with the shape, dtype and device of one of its
+      arguments: the one named ``hidden_states`` if there is one, else the
+      first; a ``@N`` suffix on the key picks argument ``N`` (0-based). The
+      stub preallocates that output so its address is stable across graph
+      replays.
 """
 
 import dataclasses
@@ -61,6 +65,7 @@ class HotFunction:
     original: Callable[..., Any]
     impl: Callable[..., Any]
     stub: Callable[..., Any]
+    out_index: int = 0
     num_modules: int = 0
     calls: int = 0
     swaps: int = 0
@@ -70,6 +75,9 @@ _FUNCTIONS: dict[str, HotFunction] = {}
 # hot_id -> (function, module instance)
 _SLOTS: list[tuple[HotFunction, nn.Module]] = []
 _ID_ATTR = "_rsii_hot_id"
+# key -> source revision of hot functions fused back by graduate(); a compile
+# factor (hot_patch.revision_factor) so no stale artifact is loaded for them.
+_GRADUATED: dict[str, str] = {}
 
 
 def source_revision(fn: Callable[..., Any]) -> str:
@@ -94,7 +102,7 @@ def _run_slot(out: torch.Tensor, hot_id: int, args: list[torch.Tensor]) -> None:
     if not isinstance(result, torch.Tensor) or result.shape != out.shape:
         raise RuntimeError(
             f"Hot function {function.key} must return a tensor shaped like its "
-            f"first argument {tuple(out.shape)}, got "
+            f"argument {function.out_index} {tuple(out.shape)}, got "
             f"{getattr(result, 'shape', type(result))}"
         )
     out.copy_(result)
@@ -129,7 +137,7 @@ direct_register_custom_op(
 )
 
 
-def _make_stub(original: Callable[..., Any]) -> Callable[..., Any]:
+def _make_stub(original: Callable[..., Any], out_index: int) -> Callable[..., Any]:
     """The method Dynamo traces in place of a hot function: one opaque op.
 
     ``__wrapped__`` points at the live implementation so source reloaders
@@ -137,7 +145,7 @@ def _make_stub(original: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     def hot_stub(self: nn.Module, *args: torch.Tensor) -> torch.Tensor:
-        out = torch.empty_like(args[0])
+        out = torch.empty_like(args[out_index])
         torch.ops.vllm.rsii_hot_call(out, getattr(self, _ID_ATTR), list(args))
         return out
 
@@ -159,8 +167,52 @@ def parse_keys(value: str | None) -> list[str]:
     return [k.strip() for k in (value or "").split(",") if k.strip()]
 
 
+def split_out_index(key: str) -> tuple[str, int | None]:
+    """``key@N`` -> (key, N); a key without suffix -> (key, None)."""
+    base, sep, index = key.partition("@")
+    return base, (int(index) if sep else None)
+
+
+def canonical(key: str, model: nn.Module | None = None) -> str:
+    """``Class.method`` -> ``module:Class.method`` via the model's modules.
+
+    Keys that already name a module are returned unchanged. The class is
+    looked up in the MRO of every module of ``model``, so a model that
+    reuses another model's class (Qwen3's ``Qwen2MLP``) resolves to it.
+    """
+    base, index = split_out_index(key)
+    if ":" in base or model is None:
+        return key
+    cls_name, _, method = base.rpartition(".")
+    found = {
+        klass
+        for module in model.modules()
+        for klass in type(module).__mro__
+        if klass.__qualname__ == cls_name and method in vars(klass)
+    }
+    if len(found) != 1:
+        raise ValueError(
+            f"Hot function {key}: {len(found)} classes named {cls_name} with "
+            f"{method} in {model.__class__.__name__}"
+        )
+    (klass,) = found
+    suffix = "" if index is None else f"@{index}"
+    return f"{klass.__module__}:{klass.__qualname__}.{method}{suffix}"
+
+
+def _out_index(original: Callable[..., Any], index: int | None) -> int:
+    if index is not None:
+        return index
+    try:
+        params = list(inspect.signature(original).parameters)[1:]
+    except (TypeError, ValueError):
+        return 0
+    return params.index("hidden_states") if "hidden_states" in params else 0
+
+
 def resolve(key: str) -> tuple[type, str]:
     """Resolve ``module:Class.method`` to the class and method name."""
+    key, _ = split_out_index(key)
     module_name, _, qualname = key.partition(":")
     cls_name, _, method = qualname.rpartition(".")
     if not module_name or not cls_name or not method:
@@ -188,23 +240,32 @@ def install(model: nn.Module, keys: list[str]) -> list[str]:
     keeps the inlined original until it is recompiled. Returns the new keys.
     """
     added = []
-    for key in keys:
+    for spec in keys:
+        spec = canonical(spec, model)
+        key, index = split_out_index(spec)
         if key in _FUNCTIONS:
             continue
         cls, name = resolve(key)
         original = getattr(cls, name)
         if _is_stub(original):
             raise RuntimeError(f"{key} already carries a hot stub")
+        out_index = _out_index(original, index)
         function = HotFunction(
             key=key,
             cls=cls,
             name=name,
             original=original,
             impl=original,
-            stub=_make_stub(original),
+            stub=_make_stub(original, out_index),
+            out_index=out_index,
         )
         for module in model.modules():
             if isinstance(module, cls) and getattr(type(module), name) is original:
+                if getattr(module, _ID_ATTR, None) is not None:
+                    raise RuntimeError(
+                        f"{key}: {type(module).__name__} already has a hot "
+                        "method (one hot method per module)"
+                    )
                 setattr(module, _ID_ATTR, len(_SLOTS))
                 _SLOTS.append((function, module))
                 function.num_modules += 1
@@ -212,6 +273,7 @@ def install(model: nn.Module, keys: list[str]) -> list[str]:
             raise RuntimeError(f"No module of {model.__class__.__name__} uses {key}")
         setattr(cls, name, function.stub)
         _FUNCTIONS[key] = function
+        _GRADUATED.pop(key, None)
         added.append(key)
         logger.info(
             "Hot function %s on %d modules (revision %s)",
@@ -233,8 +295,61 @@ def install_from_env(model: nn.Module, vllm_config: Any) -> list[str]:
     keys = parse_keys(os.environ.get(ENV_NAME))
     if not keys:
         return []
+    keys = [canonical(k, model) for k in keys]
+    # Canonical keys in the compile factor: shorthand and full spellings of
+    # the same hot set share compiled artifacts.
+    os.environ[ENV_NAME] = ",".join(keys)
     ensure_splitting_op(vllm_config.compilation_config)
     return install(model, keys)
+
+
+def graduated_factor() -> str:
+    """Hash of the graduated implementations (empty if none), for cache keys."""
+    if not _GRADUATED:
+        return ""
+    return hashlib.sha256(repr(sorted(_GRADUATED.items())).encode()).hexdigest()
+
+
+def graduate(worker: Any, keys: list[str] | None = None) -> dict[str, Any]:
+    """Fuse hot functions back into compiled code, with their current edits.
+
+    Each class gets its hot function's current implementation back as a
+    plain method, the hot op leaves the splitting ops when no hot function
+    is left, and the model is recompiled and recaptured in-process (the
+    ``recapture`` policy of hot_patch). The result computes like a fresh,
+    normally compiled engine started with the same source: Inductor fuses
+    the edited body, and FULL graphs are one piece again.
+    """
+    import time
+
+    from vllm.v1.worker.hot_patch import recapture
+
+    runner = worker.model_runner
+    if runner.req_states.req_id_to_index:
+        raise RuntimeError("graduate needs an idle engine; drain requests first")
+    started = time.perf_counter()
+    keys = list(_FUNCTIONS) if keys is None else keys
+    model = runner.get_model()
+    revisions = {}
+    for spec in keys:
+        key, _ = split_out_index(canonical(spec, model))
+        function = _FUNCTIONS.pop(key)
+        setattr(function.cls, function.name, function.impl)
+        revisions[key] = _GRADUATED[key] = source_revision(function.impl)
+        for module in model.modules():
+            hot_id = getattr(module, _ID_ATTR, None)
+            if hot_id is not None and _SLOTS[hot_id][0] is function:
+                # The slot stays (ids of other hot functions are positions in
+                # _SLOTS); the module no longer refers to it.
+                delattr(module, _ID_ATTR)
+    os.environ[ENV_NAME] = ",".join(_FUNCTIONS)
+    ops = worker.vllm_config.compilation_config.splitting_ops
+    if not _FUNCTIONS and ops is not None and HOT_OP_NAME in ops:
+        ops.remove(HOT_OP_NAME)
+    report: dict[str, Any] = {"graduated": revisions, "still_hot": list(_FUNCTIONS)}
+    report.update(recapture(worker, None))
+    report["graduate_seconds"] = time.perf_counter() - started
+    return report
 
 
 def swap(key: str, impl: Callable[..., Any]) -> str:

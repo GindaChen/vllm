@@ -24,6 +24,11 @@ class Toy(nn.Module):
 class Other(nn.Module):
     def forward(self, x):
         return x
+
+
+class Attn(nn.Module):
+    def forward(self, positions, hidden_states):
+        return hidden_states * 2
 """
 
 
@@ -37,6 +42,7 @@ def toy(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "rsii_toy_model", module)
     monkeypatch.setattr(hot_op, "_FUNCTIONS", {})
     monkeypatch.setattr(hot_op, "_SLOTS", [])
+    monkeypatch.setattr(hot_op, "_GRADUATED", {})
     monkeypatch.setattr(hot_patch, "_INSTALLED", {})
     monkeypatch.setattr(hot_patch, "_STOCK", {})
     model = nn.Sequential(module.Toy(), module.Other(), module.Toy())
@@ -83,7 +89,7 @@ def test_wrong_output_shape_is_rejected(toy):
     _, model, _ = toy
     hot_op.install(model, [KEY])
     hot_op.swap(KEY, lambda self, x: x.sum())
-    with pytest.raises(RuntimeError, match="shaped like its first argument"):
+    with pytest.raises(RuntimeError, match="shaped like its argument 0"):
         hot_op._run_slot(torch.empty(3), 0, [torch.zeros(3)])
 
 
@@ -144,3 +150,28 @@ def test_break_policy_promotes_cold_methods_once(toy, monkeypatch):
 def test_resolve_rejects_bad_keys():
     with pytest.raises(ValueError):
         hot_op.resolve("no_colon_here")
+
+
+def test_shorthand_key_and_output_argument(toy):
+    module, model, _ = toy
+    model.append(module.Attn())
+    assert hot_op.canonical("Toy.forward", model) == KEY
+    assert hot_op.canonical("Attn.forward@1", model) == (
+        "rsii_toy_model:Attn.forward@1"
+    )
+    with pytest.raises(ValueError):
+        hot_op.canonical("Missing.forward", model)
+    hot_op.install(model, ["Toy.forward", "Attn.forward"])
+    functions = hot_op.hot_functions()
+    assert functions[KEY].out_index == 0
+    # The argument named hidden_states is the output shape by default.
+    assert functions["rsii_toy_model:Attn.forward"].out_index == 1
+
+
+def test_graduated_revisions_change_the_cache_key(toy):
+    module, model, _ = toy
+    assert hot_patch.revision_factor() == ""
+    hot_op._GRADUATED[KEY] = hot_op.source_revision(module.Toy.forward)
+    first = hot_patch.revision_factor()
+    hot_op._GRADUATED[KEY] = "other"
+    assert first and hot_patch.revision_factor() not in ("", first)
