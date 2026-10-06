@@ -526,6 +526,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         get_offloader().post_init()
 
+        # Hot functions run as opaque eager ops; install before compilation.
+        from vllm.compilation import hot_op
+
+        hot_op.install_from_env(self.model, self.vllm_config)
+
         if self.compilation_config.mode == CompilationMode.STOCK_TORCH_COMPILE:
             compile_model_with_stock_torch(self.model, self.vllm_config)
 
