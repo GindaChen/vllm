@@ -144,7 +144,22 @@ def _make_stub(original: Callable[..., Any], out_index: int) -> Callable[..., An
     that unwrap decorators patch the implementation, not the stub.
     """
 
-    def hot_stub(self: nn.Module, *args: torch.Tensor) -> torch.Tensor:
+    names = _param_names(original)
+
+    def hot_stub(
+        self: nn.Module, *args: torch.Tensor, **kwargs: torch.Tensor
+    ) -> torch.Tensor:
+        if kwargs:
+            # Callers may pass arguments by name; the op takes them in
+            # signature order.
+            extra = []
+            for name in names[len(args) :]:
+                if name not in kwargs:
+                    break
+                extra.append(kwargs.pop(name))
+            if kwargs:
+                raise TypeError(f"Hot function cannot take {sorted(kwargs)}")
+            args = (*args, *extra)
         out = torch.empty_like(args[out_index])
         torch.ops.vllm.rsii_hot_call(out, getattr(self, _ID_ATTR), list(args))
         return out
@@ -200,13 +215,18 @@ def canonical(key: str, model: nn.Module | None = None) -> str:
     return f"{klass.__module__}:{klass.__qualname__}.{method}{suffix}"
 
 
+def _param_names(original: Callable[..., Any]) -> list[str]:
+    """Parameter names after ``self``, in order (empty if unknown)."""
+    try:
+        return list(inspect.signature(original).parameters)[1:]
+    except (TypeError, ValueError):
+        return []
+
+
 def _out_index(original: Callable[..., Any], index: int | None) -> int:
     if index is not None:
         return index
-    try:
-        params = list(inspect.signature(original).parameters)[1:]
-    except (TypeError, ValueError):
-        return 0
+    params = _param_names(original)
     return params.index("hidden_states") if "hidden_states" in params else 0
 
 

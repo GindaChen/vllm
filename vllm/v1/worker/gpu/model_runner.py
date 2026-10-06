@@ -1980,7 +1980,22 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             self.kv_connector.pre_forward(
                 **connector_kwargs, attn_metadata=attn_metadata
             )
-            model_output = self.cudagraph_manager.run_fullgraph(batch_desc)
+            from vllm.compilation import hot_op
+
+            if hot_op.breaks_full_graphs():
+                # Hot functions run as eager steps inside the FULL graph and
+                # may call attention, which reads the forward context.
+                with set_forward_context(
+                    attn_metadata,
+                    self.vllm_config,
+                    num_tokens=input_batch.num_tokens_after_padding,
+                    cudagraph_runtime_mode=batch_desc.cg_mode,
+                    slot_mapping=slot_mappings_by_layer,
+                    is_padding=input_batch.is_padding,
+                ):
+                    model_output = self.cudagraph_manager.run_fullgraph(batch_desc)
+            else:
+                model_output = self.cudagraph_manager.run_fullgraph(batch_desc)
         else:
             # For piecewise and eager mode, just call model().
             batch_descriptor = BatchDescriptor(
