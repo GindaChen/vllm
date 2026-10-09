@@ -102,9 +102,18 @@ class WinnerStore:
     def lookup(self, file_key: str, policy: tuple, digest: str):
         name = self.entry_key(file_key, policy, digest) + ".json"
         for directory in self.dirs:
+            path = directory / name
             try:
-                entry = json.loads((directory / name).read_text())
-            except (OSError, ValueError):
+                entry = json.loads(path.read_text())
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring unreadable FlashInfer winner %s: %s", path, exc
+                )
+                continue
+            if not isinstance(entry, dict) or not {"runner", "tactic"} <= set(entry):
+                logger.warning("Ignoring malformed FlashInfer winner %s", path)
                 continue
             # Guard against hash collisions and hand-edited files.
             if (
@@ -190,7 +199,11 @@ def serve_persisted_winners(store: WinnerStore) -> Iterator[WinnerStore]:
             entry = store.lookup(key.file_key, policy, runner_digest(type(runner)))
             if entry is None or entry["runner"] != type(runner).__name__:
                 continue
-            tactic = _json_to_tactic(entry["tactic"])
+            try:
+                tactic = _json_to_tactic(entry["tactic"])
+            except Exception as exc:
+                logger.warning("Ignoring undecodable FlashInfer winner: %s", exc)
+                continue
             if not tuner._tactic_still_valid(
                 runner, inputs, tactic, custom_op, "vllm winner store"
             ):

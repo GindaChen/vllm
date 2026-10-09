@@ -69,3 +69,13 @@ def test_read_only_layer_is_consulted_and_never_written(tmp_path):
     assert len(names) == 2  # environment.json + the original entry
     local = list((tmp_path / "local").rglob("*.json"))
     assert any(json.loads(p.read_text()).get("tactic") == [16, 5] for p in local)
+
+
+def test_malformed_entries_are_misses(tmp_path):
+    store = WinnerStore([tmp_path], ENV)
+    store.publish(KEY, POLICY, "d1", "Runner", [8, 5])
+    entry = store.dirs[0] / (store.entry_key(KEY, POLICY, "d1") + ".json")
+    no_tactic = {"file_key": KEY, "policy": list(POLICY), "runner_digest": "d1"}
+    for text in ("{not json", "[1, 2]", '"x"', json.dumps(no_tactic)):
+        entry.write_text(text)
+        assert store.lookup(KEY, POLICY, "d1") is None
