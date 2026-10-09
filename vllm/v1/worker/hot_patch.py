@@ -145,11 +145,15 @@ def revision_factor() -> str:
 
     Empty when nothing is patched, so stock cache keys are unchanged.
     """
-    revised = [
+    from vllm.compilation.hot_op import graduated_factor
+
+    revised: list[tuple[str, str]] = [
         (name, hashlib.sha256(source.encode()).hexdigest())
         for name, (source, _) in sorted(_INSTALLED.items())
         if source != _STOCK[name]
     ]
+    if graduated := graduated_factor():
+        revised.append(("hot_op.graduated", graduated))
     if not revised:
         return ""
     return hashlib.sha256(repr(revised).encode()).hexdigest()
@@ -469,7 +473,7 @@ class _CompileTimes(logging.Handler):
                 self.seconds[key] += float(match.group(1))
 
 
-def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
+def recapture(worker: Any, patch: CodePatch | None) -> dict[str, Any]:
     """Baseline policy: recompile and recapture everything in-process."""
     global _IN_RECAPTURE
     from vllm.v1.worker.gpu.eplb_utils import preserve_serving_state
@@ -524,6 +528,16 @@ def recapture(worker: Any, patch: CodePatch) -> dict[str, Any]:
 
 
 GRAPH_POLICIES["recapture"] = recapture
+
+
+def _break(worker: Any, patch: CodePatch) -> dict[str, Any]:
+    from vllm.compilation.hot_op import break_policy
+
+    return break_policy(worker, patch)
+
+
+# Hot functions (vllm/compilation/hot_op.py): edits rebuild nothing.
+GRAPH_POLICIES["break"] = _break
 
 
 def hot_patch(

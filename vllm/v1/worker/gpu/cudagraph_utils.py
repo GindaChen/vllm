@@ -13,7 +13,9 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
+from vllm.compilation import hot_op
 from vllm.compilation.breakable_cudagraph import (
+    BreakableCUDAGraphCapture,
     BreakableCUDAGraphWrapper,
     is_breakable_cudagraph_enabled,
 )
@@ -488,15 +490,26 @@ class CudaGraphManager:
                         if self._capture_mem_samples is not None:
                             torch.accelerator.synchronize()
                             free_before = torch.accelerator.get_memory_info()[0]
-                        with torch.cuda.graph(
-                            graph, self.pool, stream=self._capture_stream(desc)
-                        ):
-                            forward_fn(CUDAGraphMode.NONE)
-                            # Join offloader's copy stream after forward to avoid
-                            # unjoined stream error. The last layer's start_prefetch
-                            # forks copy_stream, but wait_prefetch only happens in
-                            # the next forward pass.
-                            get_offloader().join_after_forward()
+                        if hot_op.breaks_full_graphs():
+                            # Hot functions become eager steps between graph
+                            # segments, so swapping them needs no recapture.
+                            graph = BreakableCUDAGraphCapture(pool=self.pool)
+                            with (
+                                torch.cuda.stream(self._capture_stream(desc)),
+                                graph,
+                            ):
+                                forward_fn(CUDAGraphMode.NONE)
+                                get_offloader().join_after_forward()
+                        else:
+                            with torch.cuda.graph(
+                                graph, self.pool, stream=self._capture_stream(desc)
+                            ):
+                                forward_fn(CUDAGraphMode.NONE)
+                                # Join offloader's copy stream after forward to
+                                # avoid unjoined stream error. The last layer's
+                                # start_prefetch forks copy_stream, but
+                                # wait_prefetch only happens in the next pass.
+                                get_offloader().join_after_forward()
                         if self._capture_mem_samples is not None:
                             torch.accelerator.synchronize()
                             free_after = torch.accelerator.get_memory_info()[0]

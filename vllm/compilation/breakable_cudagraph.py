@@ -184,6 +184,8 @@ class BreakableCUDAGraphCapture:
             g.capture_begin()
         self._current_graph = g
         self._capturing = True
+        # Segments must end on the stream they began on.
+        self._stream = torch.cuda.current_stream()
 
     def _end_segment(self) -> None:
         if not self._capturing:
