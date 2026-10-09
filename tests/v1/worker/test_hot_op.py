@@ -147,6 +147,43 @@ def test_break_policy_promotes_cold_methods_once(toy, monkeypatch):
     assert other in hot_op.parse_keys(__import__("os").environ[hot_op.ENV_NAME])
 
 
+def test_refused_install_changes_nothing(toy):
+    module, model, _ = toy
+    other = module.Other.forward
+    keys = ["rsii_toy_model:Other.forward", "rsii_toy_model:Attn.forward"]
+    with pytest.raises(RuntimeError, match="No module"):
+        hot_op.install(model, keys)
+    assert module.Other.forward is other
+    assert not hot_op.hot_functions() and not hot_op._SLOTS
+    assert all(getattr(m, hot_op._ID_ATTR, None) is None for m in model)
+
+
+def test_break_policy_recaptures_when_promotion_is_refused(toy, monkeypatch):
+    module, model, path = toy
+    monkeypatch.setenv(hot_op.ENV_NAME, "")
+    # The Other instance already carries a hot method: making Other.forward
+    # hot is refused, and the edit must still be compiled in.
+    setattr(model[1], hot_op._ID_ATTR, 99)
+    new = SOURCE.replace("return x\n", "return x * 3\n")
+    patch = hot_patch.reload_sources({"rsii_toy_model": (new, str(path))})
+    calls = []
+    monkeypatch.setattr(
+        hot_patch, "recapture", lambda w, p: calls.append(p) or {"x": 1}
+    )
+    config = types.SimpleNamespace(splitting_ops=["vllm::attn"])
+    worker = types.SimpleNamespace(
+        model_runner=types.SimpleNamespace(get_model=lambda: model),
+        vllm_config=types.SimpleNamespace(compilation_config=config),
+    )
+    report = hot_op.break_policy(worker, patch)
+    assert report["promoted"] == [] and "promotion_error" in report
+    assert report["rebuilt"] == "recompile+recapture" and len(calls) == 1
+    assert not hot_op._is_stub(module.Other.forward)
+    assert module.Other.forward(model[1], torch.ones(2)).tolist() == [3.0, 3.0]
+    assert config.splitting_ops == ["vllm::attn"]
+    assert __import__("os").environ[hot_op.ENV_NAME] == ""
+
+
 def test_resolve_rejects_bad_keys():
     with pytest.raises(ValueError):
         hot_op.resolve("no_colon_here")

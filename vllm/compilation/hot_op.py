@@ -273,18 +273,40 @@ def install(model: nn.Module, keys: list[str]) -> list[str]:
 
     Must run before the model is (re)traced by Dynamo; already compiled code
     keeps the inlined original until it is recompiled. Returns the new keys.
+
+    All or nothing: every key is resolved and checked before any class or
+    module is changed, so a refused key leaves no method half-replaced.
     """
-    added = []
+    plans = []
+    claimed: dict[int, str] = {}
     for spec in keys:
         spec = canonical(spec, model)
         key, index = split_out_index(spec)
-        if key in _FUNCTIONS:
+        if key in _FUNCTIONS or any(plan[0] == key for plan in plans):
             continue
         cls, name = resolve(key)
         original = getattr(cls, name)
         if _is_stub(original):
             raise RuntimeError(f"{key} already carries a hot stub")
-        out_index = _out_index(original, index)
+        modules = [
+            module
+            for module in model.modules()
+            if isinstance(module, cls) and getattr(type(module), name) is original
+        ]
+        if not modules:
+            raise RuntimeError(f"No module of {model.__class__.__name__} uses {key}")
+        for module in modules:
+            other = claimed.get(id(module))
+            if getattr(module, _ID_ATTR, None) is not None or other is not None:
+                raise RuntimeError(
+                    f"{key}: {type(module).__name__} already has a hot "
+                    f"method{f' ({other})' if other else ''} (one hot method "
+                    "per module)"
+                )
+            claimed[id(module)] = key
+        plans.append((key, cls, name, original, _out_index(original, index), modules))
+    added = []
+    for key, cls, name, original, out_index, modules in plans:
         function = HotFunction(
             key=key,
             cls=cls,
@@ -294,18 +316,10 @@ def install(model: nn.Module, keys: list[str]) -> list[str]:
             stub=_make_stub(original, out_index),
             out_index=out_index,
         )
-        for module in model.modules():
-            if isinstance(module, cls) and getattr(type(module), name) is original:
-                if getattr(module, _ID_ATTR, None) is not None:
-                    raise RuntimeError(
-                        f"{key}: {type(module).__name__} already has a hot "
-                        "method (one hot method per module)"
-                    )
-                setattr(module, _ID_ATTR, len(_SLOTS))
-                _SLOTS.append((function, module))
-                function.num_modules += 1
-        if function.num_modules == 0:
-            raise RuntimeError(f"No module of {model.__class__.__name__} uses {key}")
+        for module in modules:
+            setattr(module, _ID_ATTR, len(_SLOTS))
+            _SLOTS.append((function, module))
+            function.num_modules += 1
         setattr(cls, name, function.stub)
         _FUNCTIONS[key] = function
         _GRADUATED.pop(key, None)
@@ -480,8 +494,16 @@ def break_policy(worker: Any, patch: Any) -> dict[str, Any]:
         if any(isinstance(m, cls) for m in model.modules()):
             promotable.append(key)
     if promotable:
+        try:
+            # All or nothing (see install): on refusal no class or module
+            # changed, and the recapture below still compiles the edit in.
+            install(model, promotable)
+        except (RuntimeError, ValueError) as e:
+            logger.warning("Not making %s hot: %s", promotable, e)
+            report["promotion_error"] = str(e)
+            promotable = []
+    if promotable:
         ensure_splitting_op(worker.vllm_config.compilation_config)
-        install(model, promotable)
         keys = parse_keys(os.environ.get(ENV_NAME)) + promotable
         # The hot set is a compile factor; keep the env in sync.
         os.environ[ENV_NAME] = ",".join(dict.fromkeys(keys))
