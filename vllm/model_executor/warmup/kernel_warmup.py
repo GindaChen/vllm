@@ -5,6 +5,7 @@ This is useful specifically for JIT'ed kernels as we don't want JIT'ing to
 happen during model execution.
 """
 
+import contextlib
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -401,6 +402,30 @@ def _run_flashinfer_bf16_autotune_dummy_run(
         )
 
 
+def _winner_store_context(tune_group_size: int):
+    """Serve persisted winners during tuning on a single-rank tuning group.
+
+    With several ranks, a rank that hits the store while another profiles
+    would desynchronize the tuner's collective timing, so the store is only
+    used when one rank tunes alone.
+    """
+    from vllm.model_executor.warmup.flashinfer_autotune_store import (
+        WinnerStore,
+        environment,
+        serve_persisted_winners,
+        store_roots,
+    )
+
+    roots = store_roots()
+    if not roots or tune_group_size > 1:
+        return contextlib.nullcontext()
+    store = WinnerStore(roots, environment())
+    logger.info_once(
+        "Using FlashInfer winner store %s (%d layer(s)).", store.dirs[0], len(roots)
+    )
+    return serve_persisted_winners(store)
+
+
 def flashinfer_autotune(runner: "GPUModelRunner") -> None:
     """Autotune FlashInfer operations.
     FlashInfer have many implementations for the same operation,
@@ -469,6 +494,7 @@ def flashinfer_autotune(runner: "GPUModelRunner") -> None:
     try:
         with (
             torch.inference_mode(),
+            _winner_store_context(tune_group.world_size),
             fi_utils.autotune(tune_mode=True, **autotune_kwargs),
         ):
             hisparse_enabled = (
