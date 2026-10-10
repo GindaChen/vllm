@@ -52,11 +52,13 @@ def module(tmp_path, monkeypatch):
     sys.modules.pop(name, None)
     hot_patch._INSTALLED.pop(name, None)
     hot_patch._STOCK.pop(name, None)
+    hot_patch._FILENAMES.pop(name, None)
     mod = importlib.import_module(name)
     yield mod
     sys.modules.pop(name, None)
     hot_patch._INSTALLED.pop(name, None)
     hot_patch._STOCK.pop(name, None)
+    hot_patch._FILENAMES.pop(name, None)
 
 
 def install(tmp_path, module, source, tag):
@@ -118,6 +120,30 @@ def test_refuses_restart_class_edits(tmp_path, module, old, new):
     with pytest.raises(hot_patch.UnsupportedEdit):
         install(tmp_path, module, STOCK.replace(old, new), "d")
     assert module.Layer.forward.__code__ is code and layer.forward(3) == 6
+
+
+def test_init_edit_needs_allow_init(tmp_path, module):
+    old = module.Layer()
+    source = STOCK.replace("self.scale = 2", "self.scale = 3")
+    path = tmp_path / "revision-init.py"
+    path.write_text(source)
+    patch = hot_patch.reload_sources(
+        {module.__name__: (source, str(path))}, allow_init=True
+    )
+    assert [c.qualname for c in patch.changed] == ["Layer.__init__"]
+    # New objects get the new body; live ones keep what the old one built.
+    assert module.Layer().scale == 3 and old.scale == 2
+
+
+def test_edit_another_function_after_a_patch(tmp_path, module):
+    layer = module.Layer()
+    first = STOCK.replace("return x + 1", "return x + 10")
+    install(tmp_path, module, first, "f")
+    # forward still carries the stock filename; it must be found.
+    second = first.replace("* self.scale", "* self.scale + 100")
+    patch = install(tmp_path, module, second, "g")
+    assert [c.qualname for c in patch.changed] == ["Layer.forward"]
+    assert layer.forward(3) == 106
 
 
 def test_closure_change_refused(tmp_path, module):

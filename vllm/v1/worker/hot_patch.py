@@ -13,6 +13,8 @@ into the running process without reloading weights or rebuilding the model:
    bound methods and ``from x import f`` aliases all see the new body.
    Anything else (signatures, decorators, constructors, module or class
    statements) raises ``UnsupportedEdit``: such an edit needs a restart.
+   A caller that re-runs edited constructors on the live instances itself
+   may pass ``allow_init=True`` to have ``__init__`` bodies installed too.
 2. A graph policy then makes the compiled and captured state agree with the
    new code. ``"recapture"`` (the baseline) drops every CUDA graph and the
    compiled model, recompiles in-process and recaptures. Other policies can
@@ -106,6 +108,10 @@ class CodePatch:
 _INSTALLED: dict[str, tuple[str, str]] = {}
 # Module name -> the source it was imported from.
 _STOCK: dict[str, str] = {}
+# Module name -> every filename its live code objects may carry: the stock
+# file and each installed revision (a function keeps the filename of the
+# revision that last changed it).
+_FILENAMES: dict[str, set[str]] = {}
 # Code objects of installed revisions that Dynamo inlined since the last
 # patch. Fed by vllm.compilation.decorators while tracing.
 _WATCHED: dict[CodeType, str] = {}
@@ -233,8 +239,13 @@ def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     )
 
 
-def _diff(module: str, old: str, new: str) -> list[str]:
-    """Names of functions whose bodies differ; refuse any other change."""
+def _diff(module: str, old: str, new: str, allow_init: bool = False) -> list[str]:
+    """Names of functions whose bodies differ; refuse any other change.
+
+    A changed ``__init__`` body is refused unless `allow_init` is set: the
+    new body only affects objects built from now on, so the caller must
+    bring live instances up to date itself.
+    """
     olds = dict(_statements(ast.parse(old)))
     news = dict(_statements(ast.parse(new)))
     if list(olds) != list(news):
@@ -252,7 +263,7 @@ def _diff(module: str, old: str, new: str) -> list[str]:
             raise UnsupportedEdit(f"{module}: {name} is not a function body edit")
         if _signature(before) != _signature(node):
             raise UnsupportedEdit(f"{module}: {name} signature or decorators")
-        if node.name == "__init__":
+        if node.name == "__init__" and not allow_init:
             raise UnsupportedEdit(
                 f"{module}: {name} changes construction; rebuild the model"
             )
@@ -274,7 +285,7 @@ def _new_code(compiled: CodeType, qualname: str) -> CodeType:
     return found[0]
 
 
-def _unwrap(value: Any, qualname: str, filename: str) -> FunctionType:
+def _unwrap(value: Any, qualname: str, filenames: set[str]) -> FunctionType:
     """Find the function defined as `qualname` behind decorators."""
     if isinstance(value, (staticmethod, classmethod)):
         value = value.__func__
@@ -290,7 +301,7 @@ def _unwrap(value: Any, qualname: str, filename: str) -> FunctionType:
             continue
         if isinstance(item, FunctionType):
             code = item.__code__
-            if code.co_qualname == qualname and code.co_filename == filename:
+            if code.co_qualname == qualname and code.co_filename in filenames:
                 return item
             stack += [c.cell_contents for c in item.__closure__ or ()]
         wrapped = getattr(item, "__wrapped__", None)
@@ -325,7 +336,9 @@ def _definition_source(source: str, qualname: str) -> str:
 
 
 def reload_sources(
-    sources: dict[str, tuple[str, str]], worker: Any = None
+    sources: dict[str, tuple[str, str]],
+    worker: Any = None,
+    allow_init: bool = False,
 ) -> CodePatch:
     """Install new function bodies from `sources` into live modules.
 
@@ -336,6 +349,10 @@ def reload_sources(
 
         worker: The live worker, or None before the engine starts. Passed
             to kernel handlers.
+
+        allow_init: Also install changed ``__init__`` bodies. Live
+            instances keep the state the old constructor built; the caller
+            is responsible for them (RSII's init re-run).
 
     Returns:
         The changed functions. Unchanged functions keep their code. Edited
@@ -358,10 +375,11 @@ def reload_sources(
             assert path is not None
             _INSTALLED[name] = (Path(path).read_text(), path)
             _STOCK[name] = _INSTALLED[name][0]
-        old_source, old_filename = _INSTALLED[name]
+        _FILENAMES.setdefault(name, set()).add(_INSTALLED[name][1])
+        old_source, _ = _INSTALLED[name]
         compiled = compile(source, filename, "exec", dont_inherit=True)
         changes = []
-        for qualname in _diff(name, old_source, source):
+        for qualname in _diff(name, old_source, source, allow_init):
             value, owner = _live_value(module, qualname)
             if _is_kernel(value):
                 kernels.append(
@@ -375,7 +393,7 @@ def reload_sources(
                     )
                 )
                 continue
-            function = _unwrap(value, qualname, old_filename)
+            function = _unwrap(value, qualname, _FILENAMES[name])
             new = _new_code(compiled, qualname)
             if new.co_freevars != function.__code__.co_freevars:
                 raise UnsupportedEdit(
@@ -407,6 +425,7 @@ def reload_sources(
                 patch.owners.add(owner)
         # Later patches diff against this source and its code objects.
         _INSTALLED[name] = (source, filename)
+        _FILENAMES[name].add(filename)
         patch.sources[name] = hashlib.sha256(source.encode()).hexdigest()
     return patch
 
