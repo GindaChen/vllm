@@ -154,6 +154,31 @@ def test_closure_change_refused(tmp_path, module):
         install(tmp_path, module, source, "e")
 
 
+def test_record_revisions(tmp_path, module):
+    # A caller adds a function itself, then records the revision.
+    source = STOCK + "\n\ndef added(x):\n    return x * 3\n"
+    path = tmp_path / "revision-added.py"
+    path.write_text(source)
+    code = compile(source, str(path), "exec")
+    new = next(c for c in hot_patch._codes(code) if c.co_name == "added")
+    module.added = type(module.helper)(new, vars(module), "added")
+    assert hot_patch.installed_source(module.__name__) == STOCK
+    assert hot_patch.revision_factor() == ""
+    hashes = hot_patch.record_revisions(
+        {module.__name__: (source, str(path))}, {new: "m:added"}
+    )
+    assert hot_patch.installed_source(module.__name__) == source
+    assert hashes[module.__name__] and hot_patch.revision_factor()
+    hot_patch.note_traced(new)
+    assert hot_patch.traced_functions() == {"m:added"}
+    # A later body edit diffs against the recorded source and finds the
+    # added function by the recorded filename.
+    later = source.replace("return x * 3", "return x * 4")
+    patch = install(tmp_path, module, later, "after")
+    assert [c.qualname for c in patch.changed] == ["added"]
+    assert module.added(2) == 8
+
+
 KERNELS = """
 import triton
 
