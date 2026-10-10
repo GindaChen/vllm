@@ -430,6 +430,52 @@ def reload_sources(
     return patch
 
 
+def installed_source(name: str) -> str:
+    """The source currently installed for module `name` (stock if none)."""
+    if name in _INSTALLED:
+        return _INSTALLED[name][0]
+    path = sys.modules[name].__file__
+    assert path is not None
+    return Path(path).read_text()
+
+
+def record_revisions(
+    sources: dict[str, tuple[str, str]], codes: dict[CodeType, str]
+) -> dict[str, str]:
+    """Record revisions a caller installed without ``reload_sources``.
+
+    A caller that installs edits ``reload_sources`` refuses (RSII's
+    structural install: added or removed definitions, signatures, module
+    constants) records them here, so later patches diff against them,
+    ``revision_factor()`` keys compile caches by them, ``_unwrap`` finds
+    functions carrying their filenames, and ``traced_functions()`` reports
+    Dynamo traces of their new code objects.
+
+    Args:
+        sources: Module name -> (installed source text, filename).
+        codes: New code object -> "module:qualname", to watch for traces.
+
+    Returns:
+        Module name -> SHA-256 of the recorded source.
+
+    """
+    hashes = {}
+    for name, (source, filename) in sources.items():
+        if name not in _INSTALLED:
+            path = sys.modules[name].__file__
+            assert path is not None
+            _INSTALLED[name] = (Path(path).read_text(), path)
+            _STOCK[name] = _INSTALLED[name][0]
+        _FILENAMES.setdefault(name, set()).add(_INSTALLED[name][1])
+        _FILENAMES[name].add(filename)
+        _INSTALLED[name] = (source, filename)
+        hashes[name] = hashlib.sha256(source.encode()).hexdigest()
+    _WATCHED.clear()
+    _TRACED.clear()
+    _WATCHED.update(codes)
+    return hashes
+
+
 def _find_instances(model: nn.Module, patch: CodePatch) -> None:
     owners = tuple(patch.owners)
     patch.modules = [
